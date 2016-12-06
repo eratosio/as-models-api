@@ -1,2 +1,8 @@
+# Python binary files.
 *.pyc
 *.pyo
+
+# Setuptools cruft.
+/build
+/dist
+*.egg-info

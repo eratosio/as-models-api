@@ -1,31 +1,23 @@
 
 import argparse
 
-def run(args):
-	if 'port' in args:
-		args['mode'] = 'web'
+def host(args):
+	from web_api import WebAPI
 	
-	mode = args.get('mode', 'local').lower()
-	if mode == 'web':
-		pass # TODO: run web front-end
-	elif mode == 'local':
-		pass # TODO: run model locally
-	else:
-		print 'Unsupported run mode "{}".'.format(mode)
+	WebAPI(args).run()
 
 # Create main arg parser.
 parser = argparse.ArgumentParser(description='Analysis Services Model Integration Engine')
 subparsers = parser.add_subparsers()
 
-# Create the parser for the "run" command
-install_model_parser = subparsers.add_parser('run', help='Run a model', parents=[opts_parser])
+# Create the parser for the "host" command
+install_model_parser = subparsers.add_parser('host', help='Host a model')
 install_model_parser.add_argument('entrypoint', help='The path to the main model file (i.e. its "entrypoint").')
-install_model_parser.add_argument('-m', '--mode', help='The "run-mode", either "web" or "local".')
-install_model_parser.add_argument('-p', '--port', help='The port to run the web api on. Implies "--mode web".', default=argpare.SUPPRESS)
-install_model_parser.add_argument('-t', '--type', help='The model type.')
-install_model_parser.set_defaults(func=run)
+install_model_parser.add_argument('-p', '--port', help='The port to run the web api on.', default=8080)
+install_model_parser.add_argument('-t', '--type', help='The model type.', default=argparse.SUPPRESS)
+install_model_parser.set_defaults(func=host)
 
-# TODO: install command
+# TODO: install command?
 
 # Parse command line.
 namespace = parser.parse_args()
