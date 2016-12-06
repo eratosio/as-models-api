@@ -1,13 +1,14 @@
 
 from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
+import python_models, r_models
 
 from sensetdp.api import API
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
 
 from as_client import Client
 
-import bottle, importlib, logging, multiprocessing, os, sys, time, traceback, urlparse
+import bottle, logging, multiprocessing, os, time, traceback, urlparse
 
 _LOG_LEVELS = {
 	'DEBUG': logging.DEBUG,
@@ -26,26 +27,11 @@ def _determine_runtime_type(args):
 	try:
 		return args['type']
 	except KeyError:
-		base, ext = os.path.splitext(args['entrypoint'])
-		return { '.py': 'python', '.r': 'r' }[ext.lower()]
-
-def run_python_model(entrypoint, context):
-	# Load the model's module.
-	model_dir, model_file = os.path.split(entrypoint)
-	module_name, module_ext = os.path.splitext(model_file)
-	sys.path.append(model_dir)
-	module = importlib.import_module(module_name)
-	
-	# Locate a callable matching the model ID.
-	implementation = getattr(module, context.model_id, None)
-	if not callable(implementation):
-		raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(context.model_id, entrypoint)) # TODO: more specific exception type?
-	
-	# Run the implementation.
-	return implementation(context)
-
-def run_r_model(entrypoint, context):
-	pass # TODO
+		entrypoint = args['entrypoint']
+		if python_models.is_valid_entrypoint(entrypoint):
+			return 'python'
+		elif r_models.is_valid_entrypoint(entrypoint):
+			return 'r'
 
 class _Port(object):
 	def __init__(self, job_context, name, type, direction):
@@ -258,9 +244,9 @@ class _JobProcess(object):
 			# TODO: see if the runtime can be made more dynamic
 			api_logger.debug('Calling implementation method for model %s...', context.model_id)
 			if self._runtime_type == 'python':
-				return_value = run_python_model(self._entrypoint, context)
+				return_value = python_models.run_model(self._entrypoint, context)
 			elif self._runtime_type == 'r':
-				return_value = run_r_model(self._entrypoint, context)
+				return_value = r_models.run_model(self._entrypoint, context)
 			else:
 				raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
 			api_logger.debug('Implementation method for model %s returned.', context.model_id)
