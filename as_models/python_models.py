@@ -6,7 +6,7 @@ def is_valid_entrypoint(entrypoint):
 	
 	return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.py')
 
-def run_model(entrypoint, args, context):
+def run_model(entrypoint, context, args, job_request):
 	# Augment the context.
 	entrypoint = os.path.abspath(entrypoint)
 	model_dir, model_file = os.path.split(entrypoint)

@@ -2,6 +2,7 @@
 from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
 import python_models, r_models
+from sentinel import SENTINEL
 
 from sensetdp.api import API
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
@@ -18,11 +19,6 @@ _LOG_LEVELS = {
 	'CRITICAL': logging.CRITICAL
 }
 
-class _Sentinel(object):
-	def __eq__(self, other):
-		return self is other
-_SENTINEL = _Sentinel()
-
 def _determine_runtime_type(entrypoint, args):
 	try:
 		return args.pop('type')
@@ -37,7 +33,7 @@ class _Port(object):
 		self._job_context = job_context
 		self._name = name
 		self._type = type
-		self._direction = direction
+		self._direction = direction.lower()
 	
 	def _get_update(self):
 		return { 'type': self._type }
@@ -163,12 +159,12 @@ class _JobContext(object):
 		self._modified_streams = set()
 		self._modified_documents = {}
 	
-	def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
+	def update(self, message=SENTINEL, progress=SENTINEL, modified_streams=[], modified_documents={}):
 		update = { k:v for k,v in {
 			'state': RUNNING,
 			'message': message,
 			'progress': progress
-		}.iteritems() if v not in (_SENTINEL, self._state.get(k, _SENTINEL)) }
+		}.iteritems() if v not in (SENTINEL, self._state.get(k, SENTINEL)) }
 		
 		self._modified_streams.update(modified_streams)
 		self._modified_documents.update(modified_documents)
@@ -246,9 +242,9 @@ class _JobProcess(object):
 			# TODO: see if the runtime can be made more dynamic
 			api_logger.debug('Calling implementation method for model %s...', context.model_id)
 			if self._runtime_type == 'python':
-				return_value = python_models.run_model(self._entrypoint, self._args, context)
+				return_value = python_models.run_model(self._entrypoint, context, self._args, self._job_request)
 			elif self._runtime_type == 'r':
-				return_value = r_models.run_model(self._entrypoint, self._args, context)
+				return_value = r_models.run_model(self._entrypoint, context, self._args, self._job_request)
 			else:
 				raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
 			api_logger.debug('Implementation method for model %s returned.', context.model_id)
@@ -273,6 +269,11 @@ class _JobProcess(object):
 class WebAPI(bottle.Bottle):
 	def __init__(self, args):
 		super(WebAPI, self).__init__()
+		
+		# TODO: if entrypoint is a manifest.json file, host the model(s)
+		# described within. If entrypoint is a directory, look for a
+		# manifest.json within the directory, then host the model(s) described
+		# within.
 		
 		self._entrypoint = args.pop('entrypoint') # TODO: gracefully handle missing entrypoint
 		self._port = args.pop('port', 8080)
