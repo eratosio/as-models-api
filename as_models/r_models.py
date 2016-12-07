@@ -6,7 +6,7 @@ def is_valid_entrypoint(entrypoint):
 	
 	return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.r')
 
-def run_model(entrypoint, context):
+def run_model(entrypoint, args, context):
 	# Load the model's module.
 	from rpy2.robjects import r # Lazy import
 	module = r.source(entrypoint)

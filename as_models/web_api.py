@@ -23,11 +23,10 @@ class _Sentinel(object):
 		return self is other
 _SENTINEL = _Sentinel()
 
-def _determine_runtime_type(args):
+def _determine_runtime_type(entrypoint, args):
 	try:
-		return args['type']
+		return args.pop('type')
 	except KeyError:
-		entrypoint = args['entrypoint']
 		if python_models.is_valid_entrypoint(entrypoint):
 			return 'python'
 		elif r_models.is_valid_entrypoint(entrypoint):
@@ -149,13 +148,14 @@ class _LogSender(logging.Handler):
 		})
 
 class _JobContext(object):
-	def __init__(self, job_request, sender):
+	def __init__(self, job_request, sender, debug):
 		self.model_id = job_request['modelId']
 		self.ports = { k:_Port.from_json(self, k, v) for k,v in job_request.get('ports', {}).iteritems()}
 		self.sensor_config = job_request.get('sensorCloudConfiguration', None)
 		self.analysis_config = job_request.get('analysisServicesConfiguration', None)
 		
 		self._sender = sender
+		self.debug = debug
 		
 		self._sensor_client = self._analysis_client = None
 		
@@ -221,9 +221,10 @@ class _JobContext(object):
 		return url, host, api_root, auth
 
 class _JobProcess(object):
-	def __init__(self, entrypoint, runtime_type, job_request, sender):
+	def __init__(self, entrypoint, runtime_type, args, job_request, sender):
 		self._entrypoint = entrypoint
 		self._runtime_type = runtime_type
+		self._args = args
 		self._job_request = job_request
 		self._sender = sender
 	
@@ -237,16 +238,17 @@ class _JobProcess(object):
 		api_logger = logging.getLogger('execution_api')
 		
 		# Create context.
-		context = _JobContext(self._job_request, self._sender)
+		debug = self._job_request.get('debug', False) or self._args.pop('debug', False)
+		context = _JobContext(self._job_request, self._sender, debug)
 		
 		# Run the model!
 		try:
 			# TODO: see if the runtime can be made more dynamic
 			api_logger.debug('Calling implementation method for model %s...', context.model_id)
 			if self._runtime_type == 'python':
-				return_value = python_models.run_model(self._entrypoint, context)
+				return_value = python_models.run_model(self._entrypoint, self._args, context)
 			elif self._runtime_type == 'r':
-				return_value = r_models.run_model(self._entrypoint, context)
+				return_value = r_models.run_model(self._entrypoint, self._args, context)
 			else:
 				raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
 			api_logger.debug('Implementation method for model %s returned.', context.model_id)
@@ -272,9 +274,10 @@ class WebAPI(bottle.Bottle):
 	def __init__(self, args):
 		super(WebAPI, self).__init__()
 		
-		self._entrypoint = args['entrypoint'] # TODO: gracefully handle missing entrypoint
-		self._port = args.get('port', 8080)
-		self._runtime_type = _determine_runtime_type(args) # TODO: gracefully handle invalid runtime type
+		self._entrypoint = args.pop('entrypoint') # TODO: gracefully handle missing entrypoint
+		self._port = args.pop('port', 8080)
+		self._runtime_type = _determine_runtime_type(self._entrypoint, args) # TODO: gracefully handle invalid runtime types
+		self._args = args
 		
 		self._process = self._receiver = None
 		self._state = { 'state': PENDING }
@@ -297,7 +300,7 @@ class WebAPI(bottle.Bottle):
 			return bottle.HTTPResponse({'error', 'Required property "modelId" is missing.'}, status=400)
 		
 		self._receiver, sender = multiprocessing.Pipe(False)
-		self._process = multiprocessing.Process(target=_JobProcess(self._entrypoint, self._runtime_type, job_request, sender))
+		self._process = multiprocessing.Process(target=_JobProcess(self._entrypoint, self._runtime_type, self._args, job_request, sender))
 		self._process.start()
 		
 		return bottle.HTTPResponse(self._update_state(), status=201)
