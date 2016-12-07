@@ -1,4 +1,5 @@
 
+from ports import DOCUMENT_PORT
 from sentinel import SENTINEL
 
 import os
@@ -41,12 +42,23 @@ def run_model(entrypoint, context, args, job_request):
 	r_update = _convert_update(context.update)
 	
 	# Run the implementation.
-	implementation(r_ports, r_sensor_config, r_analysis_config, r_update)
+	updated_ports = implementation(r_ports, r_sensor_config, r_analysis_config, r_update)
+	
+	# Update document ports.
+	for port_name, r_port in updated_ports.items():
+		port = context.ports[port_name]
+		
+		if port.type == DOCUMENT_PORT:
+			port.value = str(r_port.rx2('document')[0])
+	
+	#print updated_ports
+	#print type(updated_ports)
+	#print updated_ports.rx2('sum')
 
 def _convert_ports(ports):
 	from rpy2.robjects.vectors import ListVector
 	
-	return ListVector((k, ListVector(dict(v, name=k))) for k,v in ports.iteritems())
+	return ListVector((k, ListVector(dict({}, name=k, direction=v.pop('direction').lower(), **v))) for k,v in ports.iteritems())
 
 def _convert_update(update):
 	import rpy2.rinterface as ri

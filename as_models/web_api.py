@@ -108,8 +108,9 @@ class _DocumentPort(_Port):
 	
 	@value.setter
 	def value(self, value):
-		self._value = value
-		self._job_context.update(modified_documents={ self._name: self._value })
+		if value != self._value:
+			self._value = value
+			self._job_context.update(modified_documents={ self._name: self._value })
 
 class _SCApiProxy(API):
 	def __init__(self, job_context, auth, host, api_root):
