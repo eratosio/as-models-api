@@ -4,7 +4,7 @@ from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import SENTINEL
 import log_levels, python_models, r_models
 
-import bottle, datetime, logging, multiprocessing, time, traceback
+import bottle, datetime, logging, multiprocessing, os, time, traceback
 
 def _determine_runtime_type(entrypoint, args):
 	try:
@@ -30,8 +30,6 @@ class _Updater(object):
 			'progress': progress
 		}.iteritems() if v not in (SENTINEL, self._state.get(k, SENTINEL)) }
 		
-		print 'ABCD', update, modified_streams, modified_documents
-		
 		self._modified_streams.update(modified_streams)
 		self._modified_documents.update(modified_documents)
 		
@@ -53,8 +51,6 @@ class _Updater(object):
 			'line': line,
 			'timestamp': timestamp
 		}.iteritems() if v is not None }
-		
-		print 'EFGH', log_entry
 		
 		self._sender.send({ 'log': [ log_entry ] })
 
@@ -140,7 +136,8 @@ class WebAPI(bottle.Bottle):
 		# within.
 		
 		self._entrypoint = args.pop('entrypoint') # TODO: gracefully handle missing entrypoint
-		self._port = args.pop('port', 8080)
+		self._host = os.environ.get('MODEL_HOST', '0.0.0.0')
+		self._port = args.pop('port', os.environ.get('MODEL_PORT', 8080))
 		self._runtime_type = _determine_runtime_type(self._entrypoint, args) # TODO: gracefully handle invalid runtime types
 		self._args = args
 		
@@ -151,7 +148,7 @@ class WebAPI(bottle.Bottle):
 		self.post('/', callback=self._handle_post)
 	
 	def run(self):
-		super(WebAPI, self).run(host='0.0.0.0', port=self._port)
+		super(WebAPI, self).run(host=self._host, port=self._port)
 	
 	def _handle_get(self):
 		return self._update_state()
