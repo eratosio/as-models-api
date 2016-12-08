@@ -1,23 +1,10 @@
 
-from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
-import python_models, r_models
+from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import SENTINEL
+import log_levels, python_models, r_models
 
-from sensetdp.api import API
-from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
-
-from as_client import Client
-
-import bottle, logging, multiprocessing, os, time, traceback, urlparse
-
-_LOG_LEVELS = {
-	'DEBUG': logging.DEBUG,
-	'INFO': logging.INFO,
-	'WARNING': logging.WARNING,
-	'ERROR': logging.ERROR,
-	'CRITICAL': logging.CRITICAL
-}
+import bottle, datetime, logging, multiprocessing, time, traceback
 
 def _determine_runtime_type(entrypoint, args):
 	try:
@@ -28,135 +15,11 @@ def _determine_runtime_type(entrypoint, args):
 		elif r_models.is_valid_entrypoint(entrypoint):
 			return 'r'
 
-class _Port(object):
-	def __init__(self, job_context, name, type, direction):
-		self._job_context = job_context
-		self._name = name
-		self._type = type
-		self._direction = direction.lower()
-	
-	def _get_update(self):
-		return { 'type': self._type }
-	
-	@classmethod
-	def from_json(cls, job_context, name, json):
-		type_ = json.get('type', None)
-		if type_ is None:
-			raise ValueError('Required property "type" is missing.') # TODO: more specific exception type?
-		
-		subclass = { sub._port_type: sub for sub in cls.__subclasses__() }.get(type_, None)
-		if subclass is None:
-			raise ValueError('Unsupported port type "{}".'.format(type_)) # TODO: more specific exception type?
-		
-		return subclass(job_context, name=name, **json)
-	
-	type = property(lambda self: self._type)
-	name = property(lambda self: self._name)
-	direction = property(lambda self: self._direction)
-
-class _StreamPort(_Port):
-	_port_type = STREAM_PORT
-	
-	def __init__(self, job_context, **kwargs):
-		try:
-			self._stream_id = kwargs.pop('streamId')
-		except KeyError:
-			raise ValueError('Missing required property "streamId"') # TODO: more specific exception type?
-		
-		super(_StreamPort, self).__init__(job_context, **kwargs)
-	
-	def _get_update(self):
-		if self._stream_id in self._job_context._modified_streams:
-			return super(_StreamPort, self)._get_update()
-	
-	stream_id = property(lambda self: self._stream_id)
-
-class _MultistreamPort(_Port):
-	_port_type = MULTISTREAM_PORT
-	
-	def __init__(self, job_context, **kwargs):
-		try:
-			self._stream_ids = kwargs.pop('streamIds')
-		except KeyError:
-			raise ValueError('Missing required property "streamIds"') # TODO: more specific exception type?
-		
-		super(_MultistreamPort, self).__init__(job_context, **kwargs)
-	
-	def _get_update(self):
-		outdated_streams = self._job_context._modified_streams.intersection(self._stream_ids)
-		if outdated_streams:
-			return dict(super(_MultistreamPort, self)._get_update(), outdatedStreams=outdated_streams)
-	
-	stream_ids = property(lambda self: self._stream_ids)
-
-class _DocumentPort(_Port):
-	_port_type = DOCUMENT_PORT
-	
-	def __init__(self, job_context, **kwargs):
-		self._value = kwargs.pop('document', None) # NOTE: missing document is ok?
-		
-		super(_DocumentPort, self).__init__(job_context, **kwargs)
-	
-	def _get_update(self):
-		document = self._job_context._modified_documents.get(self._name, None)
-		if document is not None:
-			return dict(super(_DocumentPort, self)._get_update(), document=document)
-	
-	@property
-	def value(self):
-		return self._value
-	
-	@value.setter
-	def value(self, value):
-		if value != self._value:
-			self._value = value
-			self._job_context.update(modified_documents={ self._name: self._value })
-
-class _SCApiProxy(API):
-	def __init__(self, job_context, auth, host, api_root):
-		self._job_context = job_context
-		
-		super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root)
-	
-	def create_observations(self, results, streamid):
-		super(_SCApiProxy, self).create_observations(results, streamid=streamid)
-		
-		self._job_context.update(modified_streams=[streamid])
-
-class _LogSender(logging.Handler):
+class _Updater(object):
 	def __init__(self, sender):
-		super(_LogSender, self).__init__(logging.NOTSET)
-		
 		self._sender = sender
-	
-	def emit(self, record):
-		self.format(record)
-		self._sender.send({
-			'log': [
-				{
-					'level': record.levelname,
-					'logger': record.name,
-					'file': record.filename or None,
-					'lineNumber': record.lineno or None,
-					'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
-					'message': record.message
-				}
-			]
-		})
-
-class _JobContext(object):
-	def __init__(self, job_request, sender, debug):
-		self.model_id = job_request['modelId']
-		self.ports = { k:_Port.from_json(self, k, v) for k,v in job_request.get('ports', {}).iteritems()}
-		self.sensor_config = job_request.get('sensorCloudConfiguration', None)
-		self.analysis_config = job_request.get('analysisServicesConfiguration', None)
 		
-		self._sender = sender
-		self.debug = debug
-		
-		self._sensor_client = self._analysis_client = None
-		
-		self._state =  {}
+		self._state = {}
 		self._modified_streams = set()
 		self._modified_documents = {}
 	
@@ -167,6 +30,8 @@ class _JobContext(object):
 			'progress': progress
 		}.iteritems() if v not in (SENTINEL, self._state.get(k, SENTINEL)) }
 		
+		print 'ABCD', update, modified_streams, modified_documents
+		
 		self._modified_streams.update(modified_streams)
 		self._modified_documents.update(modified_documents)
 		
@@ -174,48 +39,40 @@ class _JobContext(object):
 			self._state.update(update)
 			self._sender.send(update)
 	
-	def terminate(self):
-		self._sender.send({ 'state': TERMINATED })
-		multiprocessing.current_process().terminate()
+	def log(self, message, level=None, file=None, line=None, timestamp=None):
+		if level is not None and level not in log_levels.LEVELS:
+			raise ValueError('Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
+		
+		if timestamp is None:
+			timestamp = datetime.datetime.utcnow().isoformat() + 'Z'
+		
+		log_entry = { k:v for k,v in {
+			'message': message,
+			'level': level,
+			'file': file,
+			'line': line,
+			'timestamp': timestamp
+		}.iteritems() if v is not None }
+		
+		print 'EFGH', log_entry
+		
+		self._sender.send({ 'log': [ log_entry ] })
+
+class _LogHandler(logging.Handler):
+	def __init__(self, updater):
+		super(_LogHandler, self).__init__(logging.NOTSET)
+		
+		self._updater = updater
 	
-	@property
-	def sensor_client(self):
-		if self._sensor_client is None and self._sensor_config is not None:
-			url, host, api_root, auth = _resolve_service_config(self._sensor_config)
-			
-			self._sensor_client = _SCApiProxy(self, auth, host, api_root)
-		
-		return self._sensor_client
-	
-	@property
-	def analysis_client(self):
-		if self._analysis_client is None and self._analysis_config is not None:
-			url, host, api_root, auth = _JobContext._resolve_service_config(self._analysis_config)
-			
-			self._analysis_client = Client(url, auth)
-		
-		return self._analysis_client
-	
-	@staticmethod
-	def _resolve_service_config(config):
-		# Resolve authentication.
-		if 'apiKey' in config:
-			auth = HTTPKeyAuth(config['apiKey'], 'apikey')
-		elif {'username', 'password'}.issubset(config):
-			auth = HTTPBasicAuth(config['username'], config['password'])
-		else:
-			auth = None
-		
-		# Resolve API base URL and hostname.
-		parts = urlparse.urlparse(config.get('url', ''), scheme='http')
-		scheme = config.get('scheme', parts[0])
-		host = config.get('host', parts[1])
-		api_root = config.get('apiRoot', parts[2])
-		if 'port' in config:
-			host = '{}:{}'.format(host.partition(':')[0], config['port'])
-		url = urlparse.urlunparse((scheme, host, api_root) + parts[3:])
-		
-		return url, host, api_root, auth
+	def emit(self, record):
+		self.format(record)
+		self._updater.log(
+			message=record.message,
+			level=log_levels.from_stdlib_levelno(record.levelno),
+			file=record.filename or None,
+			line=record.lineno,
+			timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000)
+		)
 
 class _JobProcess(object):
 	def __init__(self, entrypoint, runtime_type, args, job_request, sender):
@@ -226,37 +83,43 @@ class _JobProcess(object):
 		self._sender = sender
 	
 	def __call__(self):
+		updater = _Updater(self._sender)
+		
 		# Initialise logging.
-		log_level = _LOG_LEVELS.get(self._job_request.get('logLevel', 'INFO'), logging.INFO)
+		log_level = self._job_request.get('logLevel', self._args.get('log_level', 'INFO'))
 		root_logger = logging.getLogger()
-		root_logger.setLevel(log_level)
-		root_logger.addHandler(_LogSender(self._sender))
-		
+		root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
+		root_logger.addHandler(_LogHandler(updater))
 		api_logger = logging.getLogger('execution_api')
-		
-		# Create context.
-		debug = self._job_request.get('debug', False) or self._args.pop('debug', False)
-		context = _JobContext(self._job_request, self._sender, debug)
 		
 		# Run the model!
 		try:
 			# TODO: see if the runtime can be made more dynamic
-			api_logger.debug('Calling implementation method for model %s...', context.model_id)
+			model_id = self._job_request['modelId']
+			api_logger.debug('Calling implementation method for model %s...', model_id)
 			if self._runtime_type == 'python':
-				return_value = python_models.run_model(self._entrypoint, context, self._args, self._job_request)
+				python_models.run_model(self._entrypoint, self._job_request, self._args, updater)
 			elif self._runtime_type == 'r':
-				return_value = r_models.run_model(self._entrypoint, context, self._args, self._job_request)
+				r_models.run_model(self._entrypoint, self._job_request, self._args, updater)
 			else:
 				raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
-			api_logger.debug('Implementation method for model %s returned.', context.model_id)
+			api_logger.debug('Implementation method for model %s returned.', model_id)
 			
-			results = { k:v._get_update() for k,v in context.ports.iteritems() }
-			results = { k:v for k,v in results.iteritems() if v }
+			# Update ports (generate "results").
+			# TODO: this could probably be neater.
+			mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
+			results = {}
+			for port_name, port in self._job_request['ports'].iteritems(): # TODO: iterate over model ports instead?
+				if port['type'] == STREAM_PORT and port.get('streamId', None) in mod_streams:
+					results[port_name] = { 'type': port['type'] }
+				elif port['type'] == MULTISTREAM_PORT and not mod_streams.isdisjoint(port.get('streamIds', [])):
+					results[port_name] = { 'type': port['type'], 'outdatedStreams': list(mod_streams.intersection(port.get('streamIds', []))) }
+				elif port['type'] == DOCUMENT_PORT and port_name in mod_docs:
+					results[port_name] = { 'type': port['type'], 'document': mod_docs[port_name] }
 			
 			self._sender.send({
 				'state': COMPLETE,
 				'progress': 1.0,
-				'return': return_value,
 				'results': results
 			})
 		except BaseException as e:

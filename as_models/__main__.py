@@ -1,4 +1,6 @@
 
+from log_levels import INFO
+
 import argparse
 
 def host(args):
@@ -17,6 +19,7 @@ install_model_parser.add_argument('-p', '--port', help='The port to run the web 
 install_model_parser.add_argument('-t', '--type', help='The model type.', default=argparse.SUPPRESS)
 install_model_parser.add_argument('-r', '--root', help='The model "root" directory.', default=argparse.SUPPRESS)
 install_model_parser.add_argument('-d', '--debug', help='Run the model in debug mode?', action='store_true')
+install_model_parser.add_argument('-l', '--log-level', help='Default log level (when not overridden on per-job basis).', default=INFO)
 install_model_parser.set_defaults(func=host)
 
 # TODO: install command?
