@@ -44,13 +44,14 @@ class _Updater(object):
 		if timestamp is None:
 			timestamp = datetime.datetime.utcnow().isoformat() + 'Z'
 		
-		log_entry = { k:v for k,v in {
+		log_entry = {
+			'logger': 'default', # TODO: fix this
 			'message': message,
 			'level': level,
 			'file': file,
-			'line': line,
+			'lineNumber': line,
 			'timestamp': timestamp
-		}.iteritems() if v is not None }
+		}
 		
 		self._sender.send({ 'log': [ log_entry ] })
 

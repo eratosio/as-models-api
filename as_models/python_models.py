@@ -113,8 +113,8 @@ class _Context(object):
 	def __init__(self, job_request, args, updater):
 		self.model_id = job_request['modelId']
 		self.ports = { k:_Port.from_json(self, k, v) for k,v in job_request.get('ports', {}).iteritems()}
-		self.sensor_config = job_request.get('sensorCloudConfiguration', None)
-		self.analysis_config = job_request.get('analysisServicesConfiguration', None)
+		self._sensor_config = job_request.get('sensorCloudConfiguration', None)
+		self._analysis_config = job_request.get('analysisServicesConfiguration', None)
 		
 		self._updater = updater
 		self.debug = args.get('debug', False) or job_request.get('debug', False)
@@ -127,7 +127,7 @@ class _Context(object):
 	@property
 	def sensor_client(self):
 		if self._sensor_client is None and self._sensor_config is not None:
-			url, host, api_root, auth = _resolve_service_config(self._sensor_config)
+			url, host, api_root, auth = _Context._resolve_service_config(self._sensor_config)
 			
 			self._sensor_client = _SCApiProxy(self, auth, host, api_root)
 		
@@ -136,7 +136,7 @@ class _Context(object):
 	@property
 	def analysis_client(self):
 		if self._analysis_client is None and self._analysis_config is not None:
-			url, host, api_root, auth = _JobContext._resolve_service_config(self._analysis_config)
+			url, host, api_root, auth = _Context._resolve_service_config(self._analysis_config)
 			
 			self._analysis_client = Client(url, auth)
 		
