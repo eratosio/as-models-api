@@ -1,5 +1,6 @@
 
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
+import models
 
 from sensetdp.api import API
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
@@ -23,7 +24,10 @@ def run_model(entrypoint, job_request, args, updater):
 	module = importlib.import_module(module_name)
 	
 	# Locate a callable matching the model ID.
-	implementation = getattr(module, model_id, None)
+	try:
+		implementation = models._models[model_id]
+	except KeyError:
+		implementation = getattr(module, model_id, None)
 	if not callable(implementation):
 		raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
 	
