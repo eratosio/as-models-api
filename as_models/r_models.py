@@ -2,7 +2,7 @@
 from ports import DOCUMENT_PORT
 from sentinel import SENTINEL
 
-import os
+import os, urlparse
 
 # NOTE: this module makes frequent use of lazy imports to ensure rpy2 stuff is
 # only imported on an as-needed basis.
@@ -14,7 +14,6 @@ def is_valid_entrypoint(entrypoint):
 
 def run_model(entrypoint, job_request, args, updater):
 	from rpy2.robjects import r, conversion
-	from rpy2.robjects.vectors import ListVector
 	from rpy2.rinterface import NULL
 	
 	model_id = job_request['modelId']
@@ -36,10 +35,8 @@ def run_model(entrypoint, job_request, args, updater):
 		return NULL
 	
 	# Convert request to R-compatible.
-	sensor_config = job_request.get('sensorCloudConfiguration', None)
-	analysis_config = job_request.get('analysisServicesConfiguration', None)
-	r_sensor_config = None if sensor_config is None else ListVector(sensor_config)
-	r_analysis_config = None if analysis_config is None else ListVector(analysis_config)
+	r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
+	r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
 	r_ports = _convert_ports(job_request.get('ports', {}))
 	r_update = _convert_update(updater.update)
 	r_logger = _convert_logger(updater.log)
@@ -50,7 +47,42 @@ def run_model(entrypoint, job_request, args, updater):
 def _convert_ports(ports):
 	from rpy2.robjects.vectors import ListVector
 	
-	return ListVector((k, ListVector(dict({}, name=k, direction=v.pop('direction').lower(), **v))) for k,v in ports.iteritems())
+	result = {}
+	for port_name, port_config in ports.iteritems():
+		direction = port_config.pop('direction').lower()
+		
+		result[str(port_name)] = ListVector(dict(
+			name=port_name,
+			direction=direction,
+			**{ str(k):v for k,v in port_config.iteritems() }
+		))
+	
+	return ListVector(result)
+
+def _convert_service_config(config):
+	from rpy2.robjects.vectors import ListVector
+	
+	if config is not None:
+		result = { 'url': config.get('url', None) }
+		
+		if result['url'] is None:
+			scheme = config.get('scheme', 'http')
+			path = config.get('apiRoot', config.get('path', ''))
+			netloc = config['host']
+			if 'port' in config:
+				netloc += ':{}'.format(config['port'])
+			
+			result['url'] = urlparse.urlunparse((scheme, netloc, path, '', '', ''))
+		
+		if result['url'][-1] != '/':
+			result['url'] += '/'
+		
+		try:
+			result['apiKey'] = config['apiKey']
+		except KeyError:
+			result.update({ str(k):config[k] for k in ('username', 'password') })
+		
+		return ListVector(result)
 
 def _convert_update(update):
 	import rpy2.rinterface as ri

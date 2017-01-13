@@ -4,7 +4,7 @@ from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import SENTINEL
 import log_levels, python_models, r_models
 
-import bottle, datetime, logging, multiprocessing, os, time, traceback
+import bottle, datetime, json, logging, multiprocessing, os, time, traceback
 
 def _determine_runtime_type(entrypoint, args):
 	try:
@@ -14,6 +14,11 @@ def _determine_runtime_type(entrypoint, args):
 			return 'python'
 		elif r_models.is_valid_entrypoint(entrypoint):
 			return 'r'
+
+def _init_logging(handler, log_level):
+	root_logger = logging.getLogger()
+	root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
+	root_logger.addHandler(handler)
 
 class _Updater(object):
 	def __init__(self, sender):
@@ -37,7 +42,7 @@ class _Updater(object):
 			self._state.update(update)
 			self._sender.send(update)
 	
-	def log(self, message, level=None, file=None, line=None, timestamp=None):
+	def log(self, message, level=None, file=None, line=None, timestamp=None, logger=None):
 		if level is not None and level not in log_levels.LEVELS:
 			raise ValueError('Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
 		
@@ -45,19 +50,19 @@ class _Updater(object):
 			timestamp = datetime.datetime.utcnow().isoformat() + 'Z'
 		
 		log_entry = {
-			'logger': 'default', # TODO: fix this
 			'message': message,
 			'level': level,
 			'file': file,
 			'lineNumber': line,
-			'timestamp': timestamp
+			'timestamp': timestamp,
+			'logger': logger or 'default'
 		}
 		
 		self._sender.send({ 'log': [ log_entry ] })
 
-class _LogHandler(logging.Handler):
+class _JobProcessLogHandler(logging.Handler):
 	def __init__(self, updater):
-		super(_LogHandler, self).__init__(logging.NOTSET)
+		super(_JobProcessLogHandler, self).__init__(logging.NOTSET)
 		
 		self._updater = updater
 	
@@ -68,39 +73,39 @@ class _LogHandler(logging.Handler):
 			level=log_levels.from_stdlib_levelno(record.levelno),
 			file=record.filename or None,
 			line=record.lineno,
-			timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000)
+			timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+			logger=record.name
 		)
 
 class _JobProcess(object):
-	def __init__(self, entrypoint, runtime_type, args, job_request, sender):
+	def __init__(self, entrypoint, runtime_type, args, job_request, sender, logger):
 		self._entrypoint = entrypoint
 		self._runtime_type = runtime_type
 		self._args = args
 		self._job_request = job_request
 		self._sender = sender
+		self._logger = logger
 	
 	def __call__(self):
 		updater = _Updater(self._sender)
 		
 		# Initialise logging.
 		log_level = self._job_request.get('logLevel', self._args.get('log_level', 'INFO'))
-		root_logger = logging.getLogger()
-		root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
-		root_logger.addHandler(_LogHandler(updater))
-		api_logger = logging.getLogger('execution_api')
+		_init_logging(_JobProcessLogHandler(updater), log_level)
+		logger = logging.getLogger('JobProcess')
 		
 		# Run the model!
 		try:
 			# TODO: see if the runtime can be made more dynamic
 			model_id = self._job_request['modelId']
-			api_logger.debug('Calling implementation method for model %s...', model_id)
+			logger.debug('Calling implementation method for model %s...', model_id)
 			if self._runtime_type == 'python':
 				python_models.run_model(self._entrypoint, self._job_request, self._args, updater)
 			elif self._runtime_type == 'r':
 				r_models.run_model(self._entrypoint, self._job_request, self._args, updater)
 			else:
 				raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
-			api_logger.debug('Implementation method for model %s returned.', model_id)
+			logger.debug('Implementation method for model %s returned.', model_id)
 			
 			# Update ports (generate "results").
 			# TODO: this could probably be neater.
@@ -120,12 +125,30 @@ class _JobProcess(object):
 				'results': results
 			})
 		except BaseException as e:
-			api_logger.critical('Model failed with exception')
+			logger.critical('Model failed with exception')
 			
 			self._sender.send({
 				'state': FAILED,
 				'exception': traceback.format_exc()
 			})
+
+class _WebAPILogHandler(logging.Handler):
+	def __init__(self, state):
+		super(_WebAPILogHandler, self).__init__(logging.NOTSET)
+		
+		self._state = state
+	
+	def emit(self, record):
+		self.format(record)
+		
+		self._state.setdefault('log', []).append({
+			'message': record.message,
+			'level': log_levels.from_stdlib_levelno(record.levelno),
+			'file': record.filename or None,
+			'lineNumber': record.lineno,
+			'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+			'logger': record.name
+		})
 
 class WebAPI(bottle.Bottle):
 	def __init__(self, args):
@@ -145,11 +168,14 @@ class WebAPI(bottle.Bottle):
 		self._process = self._receiver = None
 		self._state = { 'state': PENDING }
 		
+		_init_logging(_WebAPILogHandler(self._state), self._args.get('log_level', 'INFO'))
+		self._logger = logging.getLogger('WebAPI')
+		
 		self.get('/', callback=self._handle_get)
 		self.post('/', callback=self._handle_post)
 	
 	def run(self):
-		super(WebAPI, self).run(host=self._host, port=self._port)
+		super(WebAPI, self).run(host=self._host, port=self._port, quiet=True)
 	
 	def _handle_get(self):
 		return self._update_state()
@@ -163,7 +189,7 @@ class WebAPI(bottle.Bottle):
 			return bottle.HTTPResponse({'error', 'Required property "modelId" is missing.'}, status=400)
 		
 		self._receiver, sender = multiprocessing.Pipe(False)
-		self._process = multiprocessing.Process(target=_JobProcess(self._entrypoint, self._runtime_type, self._args, job_request, sender))
+		self._process = multiprocessing.Process(target=_JobProcess(self._entrypoint, self._runtime_type, self._args, job_request, sender, self._logger))
 		self._process.start()
 		
 		return bottle.HTTPResponse(self._update_state(), status=201)
