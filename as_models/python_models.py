@@ -1,6 +1,7 @@
 
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
 import models
+from util import resolve_service_config
 
 from sensetdp.api import API
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
@@ -131,7 +132,7 @@ class _Context(object):
 	@property
 	def sensor_client(self):
 		if self._sensor_client is None and self._sensor_config is not None:
-			url, host, api_root, auth = _Context._resolve_service_config(self._sensor_config)
+			url, host, api_root, auth = resolve_service_config(**self._sensor_config)
 			
 			self._sensor_client = _SCApiProxy(self, auth, host, api_root)
 		
@@ -140,29 +141,8 @@ class _Context(object):
 	@property
 	def analysis_client(self):
 		if self._analysis_client is None and self._analysis_config is not None:
-			url, host, api_root, auth = _Context._resolve_service_config(self._analysis_config)
+			url, host, api_root, auth = resolve_service_config(**self._analysis_config)
 			
 			self._analysis_client = Client(url, auth)
 		
 		return self._analysis_client
-	
-	@staticmethod
-	def _resolve_service_config(config):
-		# Resolve authentication.
-		if 'apiKey' in config:
-			auth = HTTPKeyAuth(config['apiKey'], 'apikey')
-		elif {'username', 'password'}.issubset(config):
-			auth = HTTPBasicAuth(config['username'], config['password'])
-		else:
-			auth = None
-		
-		# Resolve API base URL and hostname.
-		parts = urlparse.urlparse(config.get('url', ''), scheme='http')
-		scheme = config.get('scheme', parts[0])
-		host = config.get('host', parts[1])
-		api_root = config.get('apiRoot', parts[2])
-		if 'port' in config:
-			host = '{}:{}'.format(host.partition(':')[0], config['port'])
-		url = urlparse.urlunparse((scheme, host, api_root) + parts[3:])
-		
-		return url, host, api_root, auth
