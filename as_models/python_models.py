@@ -8,7 +8,7 @@ from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
 
 from as_client import Client
 
-import importlib, os, sys, urlparse
+import importlib, os, sys
 
 def is_valid_entrypoint(entrypoint):
 	entrypoint = os.path.abspath(entrypoint)

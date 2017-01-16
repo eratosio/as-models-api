@@ -1,7 +1,12 @@
 
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
 
-def resolve_service_config(url='', scheme=None, host=None, apiRoot=None, api_root=None, port=None, username=None, password=None, apiKey=None, api_key=None):
+try:
+	import urlparse
+except ImportError:
+	import urllib.parse as urlparse
+
+def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, apiRoot=None, apiKey=None):
 	api_root = api_root or apiRoot
 	api_key = api_key or apiKey
 	

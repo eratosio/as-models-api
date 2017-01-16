@@ -100,7 +100,7 @@ class Context(object):
 		
 		return self
 	
-	def udpate(self, message=None, progress=None, modified_streams=[], modified_documents={}):
+	def update(self, message=None, progress=None, modified_streams=[], modified_documents={}):
 		# TODO: figure out a good way of handling the "message" and "progress" parameters
 		
 		self._modified_streams.update(modified_streams)
