@@ -4,9 +4,9 @@ from log_levels import INFO
 import argparse
 
 def host(args):
-	from web_api import WebAPI
-	
-	WebAPI(args).run()
+    from web_api import WebAPI
+    
+    WebAPI(args).run()
 
 # Create main arg parser.
 parser = argparse.ArgumentParser(description='Analysis Services Model Integration Engine')
