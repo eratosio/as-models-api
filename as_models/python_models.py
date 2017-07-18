@@ -106,21 +106,21 @@ class _DocumentPort(_Port):
             self._context.update(modified_documents={ self._name: self._value })
 
 class _GridPort(_Port):
-	_port_type = GRID_PORT
-	
-	def __init__(self, context, **kwargs):
-		self._catalog = kwargs.pop('catalog', None)
-		self._dataset = kwargs.pop('dataset')
-		
-		super(_GridPort, self).__init__(context, **kwargs)
-	
-	@property
-	def catalog(self):
-		return self._catalog
-	
-	@property
-	def dataset(self):
-		return self._dataset
+    _port_type = GRID_PORT
+    
+    def __init__(self, context, **kwargs):
+        self._catalog = kwargs.pop('catalog', None)
+        self._dataset = kwargs.pop('dataset')
+        
+        super(_GridPort, self).__init__(context, **kwargs)
+    
+    @property
+    def catalog(self):
+        return self._catalog
+    
+    @property
+    def dataset(self):
+        return self._dataset
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root):
@@ -134,25 +134,25 @@ class _SCApiProxy(API):
         self._context.update(modified_streams=[streamid])
 
 class _TDSClientProxy(tds_client.Client):
-	def get_dataset(self, url):
+    def get_dataset(self, url):
         url = _TDSClientProxy._get_grid_url(url)
-		return super(_TDSClientProxy, self).get_dataset(url)
+        return super(_TDSClientProxy, self).get_dataset(url)
         
     def get_subset(self, url, **kwargs):
-		url = _TDSClientProxy._get_grid_url(url)
-		return super(_TDSClientProxy, self).get_subset(url, **kwargs)
-	
-	@staticmethod
-	def _get_grid_url(grid):
-		if isinstance(grid, _GridPort):
-			# If catalog URL supplied, it MUST match this client's URL.
-			grid_context, grid_catalog = tds_client.resolve_urls(grid.catalog)
-			if not tds_client.urls.same_resource(grid_context, self.context_url):
-				raise RuntimeError('Cannot access dataset {} hosted at {} with client configured for {}.'.format(grid.dataset, grid_context, self.context_url))
-			
-			return grid.dataset
-		else:
-			return grid
+        url = _TDSClientProxy._get_grid_url(url)
+        return super(_TDSClientProxy, self).get_subset(url, **kwargs)
+    
+    @staticmethod
+    def _get_grid_url(grid):
+        if isinstance(grid, _GridPort):
+            # If catalog URL supplied, it MUST match this client's URL.
+            grid_context, grid_catalog = tds_client.resolve_urls(grid.catalog)
+            if not tds_client.urls.same_resource(grid_context, self.context_url):
+                raise RuntimeError('Cannot access dataset {} hosted at {} with client configured for {}.'.format(grid.dataset, grid_context, self.context_url))
+            
+            return grid.dataset
+        else:
+            return grid
 
 class _Context(object):
     def __init__(self, job_request, args, updater):
@@ -187,14 +187,14 @@ class _Context(object):
             self._analysis_client = ASClient(url, auth)
         
         return self._analysis_client
-	
-	@property
-	def thredds_client(self):
-		if self._tds_client is None and self._tds_config is not None:
-			url, host, api_root, auth = resolve_service_config(**self._tds_config)
-			
-			session = requests.Session()
-			session.auth = auth
-			self._tds_client = _TDSClientProxy(url, session)
-		
-		return self._tds_client
+    
+    @property
+    def thredds_client(self):
+        if self._tds_client is None and self._tds_config is not None:
+            url, host, api_root, auth = resolve_service_config(**self._tds_config)
+            
+            session = requests.Session()
+            session.auth = auth
+            self._tds_client = _TDSClientProxy(url, session)
+        
+        return self._tds_client

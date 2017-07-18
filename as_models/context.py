@@ -85,15 +85,15 @@ class Context(object):
         return self
     
     def configure_sensor_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-		url, host, api_root, auth = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+        url, host, api_root, auth = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
         
         self._sensor_client = _SCApiProxy(self, auth, host, api_root)
         
         return self
     
     def configure_analysis_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-		from as_client import Client
-		
+        from as_client import Client
+        
         url, host, api_root, auth = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
         
         self._analysis_client = Client(url, auth)
@@ -101,8 +101,8 @@ class Context(object):
         return self
     
     def configure_thredds_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-		from tds_client import Client
-		
+        from tds_client import Client
+        
         url, host, api_root, auth = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
         
         self._analysis_client = Client(url, auth)
@@ -110,12 +110,12 @@ class Context(object):
         return self
     
     def configure_clients(self, url='', scheme=None, host=None, port=None, username=None, password=None, api_key=None, sensor_path=None, analysis_path=None, thredds_path=None):
-		if sensor_path:
-			self.configure_sensor_client(url, scheme, host, sensor_path, port, username, password, api_key)
-		if analysis_path:
-			self.configure_sensor_client(url, scheme, host, analysis_path, port, username, password, api_key)
-		if thredds_path:
-			self.configure_sensor_client(url, scheme, host, thredds_path, port, username, password, api_key)
+        if sensor_path:
+            self.configure_sensor_client(url, scheme, host, sensor_path, port, username, password, api_key)
+        if analysis_path:
+            self.configure_sensor_client(url, scheme, host, analysis_path, port, username, password, api_key)
+        if thredds_path:
+            self.configure_sensor_client(url, scheme, host, thredds_path, port, username, password, api_key)
     
     def update(self, message=None, progress=None, modified_streams=[], modified_documents={}):
         # TODO: figure out a good way of handling the "message" and "progress" parameters
