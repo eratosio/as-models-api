@@ -1,14 +1,16 @@
 
-from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
+from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
 import models
 from util import resolve_service_config
 
 from sensetdp.api import API
 from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
 
-from as_client import Client
+from as_client import Client as ASClient
 
-import importlib, os, sys
+import tds_client
+
+import importlib, os, requests, sys
 
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
@@ -103,6 +105,23 @@ class _DocumentPort(_Port):
             self._value = value
             self._context.update(modified_documents={ self._name: self._value })
 
+class _GridPort(_Port):
+	_port_type = GRID_PORT
+	
+	def __init__(self, context, **kwargs):
+		self._catalog = kwargs.pop('catalog', None)
+		self._dataset = kwargs.pop('dataset')
+		
+		super(_GridPort, self).__init__(context, **kwargs)
+	
+	@property
+	def catalog(self):
+		return self._catalog
+	
+	@property
+	def dataset(self):
+		return self._dataset
+
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root):
         self._context = context
@@ -114,17 +133,39 @@ class _SCApiProxy(API):
         
         self._context.update(modified_streams=[streamid])
 
+class _TDSClientProxy(tds_client.Client):
+	def get_dataset(self, url):
+        url = _TDSClientProxy._get_grid_url(url)
+		return super(_TDSClientProxy, self).get_dataset(url)
+        
+    def get_subset(self, url, **kwargs):
+		url = _TDSClientProxy._get_grid_url(url)
+		return super(_TDSClientProxy, self).get_subset(url, **kwargs)
+	
+	@staticmethod
+	def _get_grid_url(grid):
+		if isinstance(grid, _GridPort):
+			# If catalog URL supplied, it MUST match this client's URL.
+			grid_context, grid_catalog = tds_client.resolve_urls(grid.catalog)
+			if not tds_client.urls.same_resource(grid_context, self.context_url):
+				raise RuntimeError('Cannot access dataset {} hosted at {} with client configured for {}.'.format(grid.dataset, grid_context, self.context_url))
+			
+			return grid.dataset
+		else:
+			return grid
+
 class _Context(object):
     def __init__(self, job_request, args, updater):
         self.model_id = job_request['modelId']
         self.ports = { k:_Port.from_json(self, k, v) for k,v in job_request.get('ports', {}).iteritems()}
         self._sensor_config = job_request.get('sensorCloudConfiguration', None)
         self._analysis_config = job_request.get('analysisServicesConfiguration', None)
+        self._tds_config = job_request.get('threddsConfiguration', None)
         
         self._updater = updater
         self.debug = args.get('debug', False) or job_request.get('debug', False)
         
-        self._sensor_client = self._analysis_client = None
+        self._sensor_client = self._analysis_client = self._tds_client = None
     
     def update(self, *args, **kwargs):
         self._updater.update(*args, **kwargs)
@@ -143,6 +184,17 @@ class _Context(object):
         if self._analysis_client is None and self._analysis_config is not None:
             url, host, api_root, auth = resolve_service_config(**self._analysis_config)
             
-            self._analysis_client = Client(url, auth)
+            self._analysis_client = ASClient(url, auth)
         
         return self._analysis_client
+	
+	@property
+	def thredds_client(self):
+		if self._tds_client is None and self._tds_config is not None:
+			url, host, api_root, auth = resolve_service_config(**self._tds_config)
+			
+			session = requests.Session()
+			session.auth = auth
+			self._tds_client = _TDSClientProxy(url, session)
+		
+		return self._tds_client
