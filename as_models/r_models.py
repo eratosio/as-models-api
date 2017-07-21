@@ -93,7 +93,7 @@ def _convert_service_config(config):
             result['url'] += '/'
         
         if 'apiKey' in config:
-            result['apiKey'] = config['apiKey']
+            result['api_key'] = config['apiKey']
         elif 'username' in config and 'password' in config:
             result['username'] = config['username']
             result['password'] = config['password']
