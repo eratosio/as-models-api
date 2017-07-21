@@ -15,6 +15,7 @@ def is_valid_entrypoint(entrypoint):
 def run_model(entrypoint, job_request, args, updater):
     from rpy2.robjects import r, conversion
     from rpy2.rinterface import NULL
+    from rpy2.robjects.vectors import ListVector
     
     model_id = job_request['modelId']
     
@@ -37,12 +38,26 @@ def run_model(entrypoint, job_request, args, updater):
     # Convert request to R-compatible.
     r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
     r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
+    r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration', None))
     r_ports = _convert_ports(job_request.get('ports', {}))
     r_update = _convert_update(updater.update)
     r_logger = _convert_logger(updater.log)
     
+    # Create context object.
+    context = {
+        'ports': r_ports,
+        'update': r_update,
+        'log': r_logger
+    }
+    if r_sensor_config:
+        context['sensor_config'] = r_sensor_config
+    if r_analysis_config:
+        context['analysis_config'] = r_analysis_config
+    if r_thredds_config:
+        context['thredds_config'] = r_thredds_config    
+    
     # Run the implementation.
-    implementation(r_ports, r_sensor_config, r_analysis_config, r_update, r_logger)
+    implementation(ListVector(context))
 
 def _convert_ports(ports):
     from rpy2.robjects.vectors import ListVector
@@ -77,10 +92,11 @@ def _convert_service_config(config):
         if result['url'][-1] != '/':
             result['url'] += '/'
         
-        try:
+        if 'apiKey' in config:
             result['apiKey'] = config['apiKey']
-        except KeyError:
-            result.update({ str(k):config[k] for k in ('username', 'password') })
+        elif 'username' in config and 'password' in config:
+            result['username'] = config['username']
+            result['password'] = config['password']
         
         return ListVector(result)
 
