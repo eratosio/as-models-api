@@ -1,167 +1,184 @@
 
-from collections import Mapping
-from abc import ABCMeta, abstractmethod, abstractproperty
+from context import BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
+from util import resolve_service_config
+import ports
 
-class BasePort(object):
-    __metaclass__ = ABCMeta
-    
-    def __init__(self, context, name, type, direction):
-        self.__context = context
-        self.__name = name
-        self.__type = type
-        self.__direction = direction
-    
-    @property
-    def type(self):
-        return self.__type
-    
-    @property
-    def name(self):
-        return self.__name
-    
-    @property
-    def direction(self):
-        return self.__direction
-    
-    @property
-    def _context(self):
-        return self.__context
-    
-    @abstractmethod
-    def get(self, default):
-        pass
-    
-    @abstractproperty
-    def was_supplied(self):
-        pass
+from sensetdp.api import API
 
-class BaseStreamPort(BasePort):
-    def get(self, default=None):
-        return self.stream_id if self.was_supplied else default
+class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazily.
+    def __init__(self, context, auth, host, api_root):
+        self._context = context
+        
+        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root)
     
-    @abstractproperty
+    def create_observations(self, results, streamid):
+        super(_SCApiProxy, self).create_observations(results, streamid=streamid)
+        
+        self._context.update(modified_streams=[streamid])
+
+class StreamPort(BaseStreamPort):
+    def __init__(self, context, name, type, direction, stream_id):
+        super(StreamPort, self).__init__(context, name, type, direction)
+        
+        self._stream_id = stream_id
+    
+    @property
     def stream_id(self):
-        pass
-
-class BaseMultistreamPort(BasePort):
-    def get(self, default=None):
-        return self.stream_ids if self.was_supplied else default
+        return self._stream_id
     
-    @abstractproperty
+    @property
+    def was_supplied(self):
+        return self._stream_id is not None
+
+class MultistreamPort(BaseMultistreamPort):
+    def __init__(self, context, name, type, direction, stream_ids):
+        super(MultistreamPort, self).__init__(context, name, type, direction)
+        
+        self._stream_ids = stream_ids
+    
+    @property
     def stream_ids(self):
-        pass
-
-class BaseDocumentPort(BasePort):
-    def get(self, default=None):
-        return self.document if self.was_supplied else default
+        return self._stream_ids
     
-    @abstractproperty
+    @property
+    def was_supplied(self):
+        return self._stream_ids is not None
+
+class DocumentPort(BaseDocumentPort):
+    def __init__(self, context, name, type, direction, document):
+        super(DocumentPort, self).__init__(context, name, type, direction)
+        
+        self._document = document
+        self._supplied = document is not None
+    
+    @property
     def document(self):
-        pass
+        return self._document
     
     @document.setter
     def document(self, document):
-        pass
+        if document != self._document:
+            self._document = document
+            self._context.update(modified_documents={ self.name: self.document })
+    
+    @property
+    def was_supplied(self):
+        return self._supplied
 
-class BaseGridPort(BasePort):
-    def __init__(self, context, name, type, direction):
-        super(BaseGridPort, self).__init__(context, name, type, direction)
+class GridPort(BaseGridPort):
+    def __init__(self, context, name, type, direction, catalog_url, dataset_path):
+        super(GridPort, self).__init__(context, name, type, direction)
         
-        self.__dataset = None
+        self._catalog_url = catalog_url
+        self._dataset_path = dataset_path
     
-    def get(self, default=None):
-        return self.dataset if self.was_supplied else default
-    
-    @abstractproperty
+    @property
     def catalog_url(self):
-        pass
+        return self._catalog_url
     
-    @abstractproperty
+    @property
     def dataset_path(self):
-        pass
+        return self._dataset_path
     
     @property
-    def dataset(self):
-        if self.__dataset is None:
-            from tds_client import Dataset
-            
-            client = self._context.thredds_client if self.catalog_url is None else self._context._get_thredds_client(self.catalog_url)
-            
-            if client is not None:
-                self.__dataset = Dataset.from_url(self.dataset_path, client=client)
-        
-        return self.__dataset
+    def was_supplied(self):
+        return self._dataset_path is not None
 
-class Ports(Mapping):
-    def __init__(self):
-        self.__ports = {}
+class Context(BaseContext):
+    def __init__(self, model_id=None):
+        super(Context, self).__init__()
         
-    def __getitem__(self, key):
-        return self.__ports[key]
-    
-    def __iter__(self):
-        return iter(self.__ports)
-    
-    def __len__(self):
-        return len(self.__ports)
-    
-    def __getattr__(self, attr):
-        try:
-            print 'AAA', attr
-            return self.__ports[attr]
-        except KeyError:
-            raise AttributeError()
-    
-    def _add(self, port): # For use by context classes.
-        self.__ports[port.name] = port
-
-class BaseContext(object):
-    __metaclass__ = ABCMeta
-    
-    def __init__(self):
-        self.__ports = Ports()
-        self.__thredds_clients = {}
-    
-    def __getattr__(self, attr):
-        print 'BBB', attr
-        return getattr(self.__ports, attr)
-    
-    def _get_thredds_client(self, url):
-        from tds_client import Client
+        self._model_id = model_id
         
-        # Ensure "main" client is pre-cached
-        self._cache_thredds_client(self.thredds_client)
+        self._modified_streams = set()
+        self._modified_documents = {}
         
-        return self._cache_thredds_client(Client(url))
+        self._sensor_config = self._analysis_config = self._thredds_config = None
+        self._sensor_client = self._analysis_client = self._thredds_client = None
     
-    def _cache_thredds_client(self, client):
-        if client is not None:
-            return self.__thredds_clients.setdefault(client.context_url, client)
+    def configure_port(self, name, type, direction, stream_id=None, stream_ids=None, document=None, catalog_url=None, dataset_path=None):
+        if type == ports.STREAM_PORT:
+            self.ports._add(StreamPort(self, name, type, direction, stream_id))
+        elif type == ports.MULTISTREAM_PORT:
+            self.ports._add(MultistreamPort(self, name, type, direction, stream_ids))
+        elif type == ports.DOCUMENT_PORT:
+            self.ports._add(DocumentPort(self, name, type, direction, document))
+        elif type == ports.GRID_PORT:
+            self.ports._add(GridPort(self, name, type, direction, catalog_url, dataset_path))
+        else:
+            raise ValueError('Unsupported port type "{}"'.format(type))
+        
+        return self
+    
+    def configure_sensor_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
+        self._sensor_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+        return self
+    
+    def configure_analysis_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
+        self._analysis_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+        return self
+    
+    def configure_thredds_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
+        self._thredds_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+        return self
+    
+    def configure_clients(self, url='', scheme=None, host=None, port=None, username=None, password=None, api_key=None, sensor_path=None, analysis_path=None, thredds_path=None):
+        if sensor_path:
+            self.configure_sensor_client(url, scheme, host, sensor_path, port, username, password, api_key)
+        if analysis_path:
+            self.configure_analysis_client(url, scheme, host, analysis_path, port, username, password, api_key)
+        if thredds_path:
+            self.configure_thredds_client(url, scheme, host, thredds_path, port, username, password, api_key)
+    
+    def update(self, message=None, progress=None, modified_streams=[], modified_documents={}):
+        # TODO: figure out a good way of handling the "message" and "progress" parameters
+        
+        self._modified_streams.update(modified_streams)
+        self._modified_documents.update(modified_documents)
     
     @property
-    def ports(self):
-        return self.__ports
+    def modified_streams(self):
+        return self._modified_streams
     
-    @abstractmethod
-    def update(self, *args, **kwargs):
-        pass
+    @property
+    def modified_documents(self):
+        return self._modified_documents
     
-    @abstractproperty
+    @property
     def model_id(self):
-        pass
+        return self._model
     
-    @abstractproperty
+    @model_id.setter
+    def model_id(self, model_id):
+		self._model_id = model_id
+    
+    @property
     def sensor_client(self):
-        pass
+        if self._sensor_client is None and self._sensor_config is not None:
+            _, host, api_root, auth = self._sensor_config
+            self._sensor_client = _SCApiProxy(self, auth, host, api_root)
+        
+        return self._sensor_client
     
-    @abstractproperty
+    @property
     def analysis_client(self):
-        pass
+        if self._analysis_client is None and self._analysis_config is not None:
+            from as_client import Client
+            
+            url, _, _, auth = self._analysis_config
+            self._analysis_client = Client(url, auth)
+        
+        return self._analysis_client
     
-    @abstractproperty
+    @property
     def thredds_client(self):
-        pass
-    
+        if self._thredds_client is None and self._thredds_config is not None:
+            from tds_client import Client
+            
+            url, _, _, auth = self._thredds_config
+            self._thredds_client = Client(url, auth)
+        
+        return self._thredds_client
 
 
 
@@ -196,9 +213,12 @@ class BaseContext(object):
 
 
 
+"""import ports
+from util import resolve_service_config
 
+from sensetdp.api import API
 
-'''class _Port(object):
+class _Port(object):
     def __init__(self, context, name, type, direction):
         self._context = context
         self._name = name
@@ -383,4 +403,4 @@ class Context(object):
         self.thredds_client # ensure "main" client is cached 
         
         client = TDSClient(url)
-        return self._thredds_clients.setdefault(client.context_url, client)'''
+        return self._thredds_clients.setdefault(client.context_url, client)"""
