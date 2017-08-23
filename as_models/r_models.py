@@ -1,11 +1,13 @@
 
 from ports import DOCUMENT_PORT
-from sentinel import SENTINEL
+from sentinel import Sentinel
 
 import os, urlparse
 
 # NOTE: this module makes frequent use of lazy imports to ensure rpy2 stuff is
 # only imported on an as-needed basis.
+
+_SENTINEL = Sentinel()
 
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
@@ -104,16 +106,16 @@ def _convert_update(update):
     import rpy2.rinterface as ri
     from rpy2.robjects.vectors import Vector, ListVector
     
-    def wrapper(message=SENTINEL, progress=SENTINEL, modified_streams=SENTINEL, modified_documents=SENTINEL):
+    def wrapper(message=_SENTINEL, progress=_SENTINEL, modified_streams=_SENTINEL, modified_documents=_SENTINEL):
         update_kwargs = {}
         
-        if message not in (SENTINEL, ri.NULL):
+        if message not in (_SENTINEL, ri.NULL):
             update_kwargs['message'] = _extract_scalar(message)
-        if progress not in (SENTINEL, ri.NULL):
+        if progress not in (_SENTINEL, ri.NULL):
             update_kwargs['progress'] = _extract_scalar(progress)
-        if modified_streams not in (SENTINEL, ri.NULL):
+        if modified_streams not in (_SENTINEL, ri.NULL):
             update_kwargs['modified_streams'] = set(modified_streams)
-        if modified_documents not in (SENTINEL, ri.NULL):
+        if modified_documents not in (_SENTINEL, ri.NULL):
             mod_docs = update_kwargs['modified_documents'] = {}
             for k,v in ListVector(modified_documents).items():
                 if not isinstance(v, Vector) or len(v) != 1:

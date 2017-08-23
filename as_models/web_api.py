@@ -1,10 +1,12 @@
 
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
 from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
-from sentinel import SENTINEL
+from sentinel import Sentinel
 import log_levels, python_models, r_models
 
 import bottle, datetime, json, logging, multiprocessing, os, time, traceback
+
+_SENTINEL = Sentinel()
 
 def _determine_runtime_type(entrypoint, args):
     try:
@@ -28,12 +30,12 @@ class _Updater(object):
         self._modified_streams = set()
         self._modified_documents = {}
     
-    def update(self, message=SENTINEL, progress=SENTINEL, modified_streams=[], modified_documents={}):
+    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
         update = { k:v for k,v in {
             'state': RUNNING,
             'message': message,
             'progress': progress
-        }.iteritems() if v not in (SENTINEL, self._state.get(k, SENTINEL)) }
+        }.iteritems() if v not in (_SENTINEL, self._state.get(k, _SENTINEL)) }
         
         self._modified_streams.update(modified_streams)
         self._modified_documents.update(modified_documents)
