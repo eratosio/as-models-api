@@ -122,7 +122,7 @@ class Context(BaseContext):
         
         # Add supplied ports.
         for name,v in job_request.get('ports', {}).iteritems():
-            type = v.get('type', None)
+            type = v.get('type')
             
             if type == STREAM_PORT:
                 self.ports._add(StreamPort(self, name=name, **v))
@@ -137,11 +137,12 @@ class Context(BaseContext):
         
         # TODO: Add unsupplied ports.
         
-        self._sensor_config = job_request.get('sensorCloudConfiguration', None)
-        self._analysis_config = job_request.get('analysisServicesConfiguration', None)
-        self._thredds_config = job_request.get('threddsConfiguration', None)
+        self._sensor_config = job_request.get('sensorCloudConfiguration')
+        self._analysis_config = job_request.get('analysisServicesConfiguration')
+        self._thredds_config = job_request.get('threddsConfiguration')
+        self._thredds_upload_config = job_request.get('threddsUploadConfiguration')
         
-        self._sensor_client = self._analysis_client = self._thredds_client = None
+        self._sensor_client = self._analysis_client = self._thredds_client = self._thredds_upload_client = None
     
     def update(self, *args, **kwargs): # TODO: fix method signature
         self._updater.update(*args, **kwargs)
@@ -174,218 +175,28 @@ class Context(BaseContext):
             from tds_client import Client
             
             url, _, _, auth = resolve_service_config(**self._thredds_config)
+            
             session = requests.Session()
             session.auth = auth
+            
             self._thredds_client = Client(url, session)
         
         return self._thredds_client
     
     @property
-    def debug(self):
-        return self._debug
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""class _Port(object):
-    def __init__(self, context, name, type, direction):
-        self._context = context
-        self._name = name
-        self._type = type
-        self._direction = direction.lower()
-    
-    @classmethod
-    def from_json(cls, context, name, json):
-        type_ = json.get('type', None)
-        if type_ is None:
-            raise ValueError('Required property "type" is missing.') # TODO: more specific exception type?
-        
-        subclass = { sub._port_type: sub for sub in cls.__subclasses__() }.get(type_, None)
-        if subclass is None:
-            raise ValueError('Unsupported port type "{}".'.format(type_)) # TODO: more specific exception type?
-        
-        return subclass(context, name=name, **json)
-    
-    type = property(lambda self: self._type)
-    name = property(lambda self: self._name)
-    direction = property(lambda self: self._direction)
-
-class _StreamPort(_Port):
-    _port_type = STREAM_PORT
-    
-    def __init__(self, context, **kwargs):
-        try:
-            self._stream_id = kwargs.pop('streamId')
-        except KeyError:
-            raise ValueError('Missing required property "streamId"') # TODO: more specific exception type?
-        
-        super(_StreamPort, self).__init__(context, **kwargs)
-    
-    stream_id = property(lambda self: self._stream_id)
-
-class _MultistreamPort(_Port):
-    _port_type = MULTISTREAM_PORT
-    
-    def __init__(self, context, **kwargs):
-        try:
-            self._stream_ids = kwargs.pop('streamIds')
-        except KeyError:
-            raise ValueError('Missing required property "streamIds"') # TODO: more specific exception type?
-        
-        super(_MultistreamPort, self).__init__(context, **kwargs)
-    
-    stream_ids = property(lambda self: self._stream_ids)
-
-class _DocumentPort(_Port):
-    _port_type = DOCUMENT_PORT
-    
-    def __init__(self, context, **kwargs):
-        self._value = kwargs.pop('document', None) # NOTE: missing document is ok?
-        
-        super(_DocumentPort, self).__init__(context, **kwargs)
-    
-    @property
-    def value(self):
-        return self._value
-    
-    @value.setter
-    def value(self, value):
-        if value != self._value:
-            self._value = value
-            self._context.update(modified_documents={ self._name: self._value })
-
-class _GridPort(_Port):
-    _port_type = GRID_PORT
-    
-    def __init__(self, context, **kwargs):
-        self._catalog_url = kwargs.pop('catalog', None)
-        self._dataset_path = kwargs.pop('dataset')
-        
-        self._dataset = None
-        
-        super(_GridPort, self).__init__(context, **kwargs)
-    
-    @property
-    def catalog_url(self):
-        return self._catalog_url
-    
-    @property
-    def dataset_path(self):
-        return self._dataset_path
-    
-    @property
-    def dataset(self):
-        if self._dataset is None:
-            client = self._context.thredds_client if self._catalog_url is None else self._context._get_thredds_client(self._catalog_url)
+    def thredds_upload_client(self):
+        if self._thredds_upload_client is None and self._thredds_upload_config is not None:
+            from tds_upload import Client
             
-            if client is not None:
-                self._dataset = TDSDataset.from_url(self._dataset_path, client=client)
-        
-        return self._dataset
-
-class _SCApiProxy(API):
-    def __init__(self, context, auth, host, api_root):
-        self._context = context
-        
-        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root)
-    
-    def create_observations(self, results, streamid):
-        super(_SCApiProxy, self).create_observations(results, streamid=streamid)
-        
-
-class _Context(object):
-    def __init__(self, job_request, args, updater):
-        self.model_id = job_request['modelId']
-        self.ports = { k:_Port.from_json(self, k, v) for k,v in job_request.get('ports', {}).iteritems()}
-        self._sensor_config = job_request.get('sensorCloudConfiguration', None)
-        self._analysis_config = job_request.get('analysisServicesConfiguration', None)
-        self._tds_config = job_request.get('threddsConfiguration', None)
-        
-        self._updater = updater
-        self.debug = args.get('debug', False) or job_request.get('debug', False)
-        
-        self._sensor_client = self._analysis_client = self._tds_client = None
-        
-        self._thredds_clients = {}
-    
-    def update(self, *args, **kwargs):
-        self._updater.update(*args, **kwargs)
-    
-    @property
-    def sensor_client(self):
-        if self._sensor_client is None and self._sensor_config is not None:
-            url, host, api_root, auth = resolve_service_config(**self._sensor_config)
+            url, _, _, auth = resolve_service_config(**self._thredds_upload_config)
             
-            self._sensor_client = _SCApiProxy(self, auth, host, api_root)
-        
-        return self._sensor_client
-    
-    @property
-    def analysis_client(self):
-        if self._analysis_client is None and self._analysis_config is not None:
-            url, host, api_root, auth = resolve_service_config(**self._analysis_config)
-            
-            self._analysis_client = ASClient(url, auth)
-        
-        return self._analysis_client
-    
-    @property
-    def thredds_client(self):
-        if self._tds_client is None and self._tds_config is not None:
-            url, host, api_root, auth = resolve_service_config(**self._tds_config)
-            
-            # Create session and client.
             session = requests.Session()
             session.auth = auth
-            self._tds_client = TDSClient(url, session)
             
-            # Add to cache of known clients.
-            self._thredds_clients[self._tds_client.context_url] = self._tds_client
+            self._thredds_upload_client = Client(url, session)
         
-        return self._tds_client
+        return self._thredds_upload_client
     
-    def _get_thredds_client(self, url):
-        self.thredds_client # ensure "main" client is cached 
-        
-        client = TDSClient(url)
-        return self._thredds_clients.setdefault(client.context_url, client)"""
+    @property
+    def debug(self):
+        return self._debug

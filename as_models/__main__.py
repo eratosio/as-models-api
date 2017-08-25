@@ -22,7 +22,7 @@ install_model_parser.add_argument('-d', '--debug', help='Run the model in debug 
 install_model_parser.add_argument('-l', '--log-level', help='Default log level (when not overridden on per-job basis).', default=INFO)
 install_model_parser.set_defaults(func=host)
 
-# TODO: install, validate commands?
+# TODO: install, validate, package commands?
 
 # Parse command line.
 namespace = parser.parse_args()
