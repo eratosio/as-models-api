@@ -5,6 +5,32 @@ import ports
 
 from sensetdp.api import API
 
+import contextlib, requests, warnings
+
+try:
+    from functools import partialmethod
+except ImportError:
+    # Python 2 fallback: https://gist.github.com/carymrobbins/8940382
+    from functools import partial
+
+    class partialmethod(partial):
+        def __get__(self, instance, owner):
+            if instance is None:
+                return self
+
+            return partial(self.func, instance, *(self.args or ()), **(self.keywords or {}))
+
+@contextlib.contextmanager
+def ssl_verification_disabled():
+    old_request = requests.Session.request
+    requests.Session.request = partialmethod(old_request, verify=False)
+
+    warnings.filterwarnings('ignore', 'Unverified HTTPS request')
+    yield
+    warnings.resetwarnings()
+
+    requests.Session.request = old_request
+
 class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazily.
     def __init__(self, context, auth, host, api_root):
         self._context = context
