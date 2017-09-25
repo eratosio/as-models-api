@@ -71,21 +71,21 @@ class MultistreamPort(BaseMultistreamPort):
         return self._stream_ids is not None
 
 class DocumentPort(BaseDocumentPort):
-    def __init__(self, context, name, type, direction, document):
+    def __init__(self, context, name, type, direction, value):
         super(DocumentPort, self).__init__(context, name, type, direction)
         
-        self._document = document
-        self._supplied = document is not None
+        self._value = value
+        self._supplied = value is not None
     
     @property
-    def document(self):
-        return self._document
+    def value(self):
+        return self._value
     
-    @document.setter
-    def document(self, document):
-        if document != self._document:
-            self._document = document
-            self._context.update(modified_documents={ self.name: self.document })
+    @value.setter
+    def value(self, value):
+        if value != self._value:
+            self._value = value
+            self._context.update(modified_documents={ self.name: self.value })
     
     @property
     def was_supplied(self):
@@ -122,13 +122,13 @@ class Context(BaseContext):
         self._sensor_config = self._analysis_config = self._thredds_config = self._thredds_upload_config = None
         self._sensor_client = self._analysis_client = self._thredds_client = self._thredds_upload_client = None
     
-    def configure_port(self, name, type, direction, stream_id=None, stream_ids=None, document=None, catalog_url=None, dataset_path=None):
+    def configure_port(self, name, type, direction, stream_id=None, stream_ids=None, value=None, catalog_url=None, dataset_path=None):
         if type == ports.STREAM_PORT:
             self.ports._add(StreamPort(self, name, type, direction, stream_id))
         elif type == ports.MULTISTREAM_PORT:
             self.ports._add(MultistreamPort(self, name, type, direction, stream_ids))
         elif type == ports.DOCUMENT_PORT:
-            self.ports._add(DocumentPort(self, name, type, direction, document))
+            self.ports._add(DocumentPort(self, name, type, direction, value))
         elif type == ports.GRID_PORT:
             self.ports._add(GridPort(self, name, type, direction, catalog_url, dataset_path))
         else:

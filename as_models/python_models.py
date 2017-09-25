@@ -65,20 +65,20 @@ class MultistreamPort(BaseMultistreamPort):
 
 class DocumentPort(BaseDocumentPort):
     def __init__(self, context, **kwargs):
-        self._document = kwargs.pop('document', None)
-        self._supplied = self._document is not None
+        self._value = kwargs.pop('document', None)
+        self._supplied = self._value is not None
         
         super(DocumentPort, self).__init__(context, **kwargs)
     
     @property
-    def document(self):
-        return self._document
+    def value(self):
+        return self._value
     
-    @document.setter
-    def document(self, document):
-        if document != self._document:
-            self._document = document
-            self._context.update(modified_documents={ self.name: self.document })
+    @value.setter
+    def value(self, value):
+        if value != self._value:
+            self._value = value
+            self._context.update(modified_documents={ self.name: self.value })
     
     @property
     def was_supplied(self):

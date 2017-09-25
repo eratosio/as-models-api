@@ -55,14 +55,14 @@ class BaseMultistreamPort(BasePort):
 
 class BaseDocumentPort(BasePort):
     def get(self, default=None):
-        return self.document if self.was_supplied else default
+        return self.value if self.was_supplied else default
     
     @abstractproperty
-    def document(self):
+    def value(self):
         pass
     
-    @document.setter
-    def document(self, document):
+    @value.setter
+    def value(self, value):
         pass
 
 class BaseGridPort(BasePort):
