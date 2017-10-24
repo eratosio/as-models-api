@@ -4,7 +4,7 @@ from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import Sentinel
 import log_levels, python_models, r_models
 
-import bottle, datetime, json, logging, multiprocessing, os, time, traceback
+import bottle, datetime, json, logging, multiprocessing, os, sys, time, traceback
 
 _SENTINEL = Sentinel()
 
@@ -57,7 +57,7 @@ class _Updater(object):
             'file': file,
             'lineNumber': line,
             'timestamp': timestamp,
-            'logger': logger or 'default'
+            'logger': logger
         }
         
         self._sender.send({ 'log': [ log_entry ] })
@@ -79,6 +79,19 @@ class _JobProcessLogHandler(logging.Handler):
             logger=record.name
         )
 
+class StreamRedirect(object):
+    def __init__(self, original_stream, updater, log_level):
+        self._original_stream = original_stream
+        self._updater = updater
+        self._log_level = log_level
+    
+    def write(self, string):
+        self._original_stream.write(string)
+        self._updater.log(string, level=self._log_level)
+    
+    def flush(self):
+        self._original_stream.flush()
+
 class _JobProcess(object):
     def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger):
         self._entrypoint = entrypoint
@@ -93,6 +106,8 @@ class _JobProcess(object):
         updater = _Updater(self._sender)
         
         # Initialise logging.
+        sys.stdout = StreamRedirect(sys.stdout, updater, log_levels.STDOUT)
+        sys.stderr = StreamRedirect(sys.stderr, updater, log_levels.STDERR)
         log_level = self._job_request.get('logLevel', self._args.get('log_level', 'INFO'))
         _init_logging(_JobProcessLogHandler(updater), log_level)
         logger = logging.getLogger('JobProcess')

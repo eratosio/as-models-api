@@ -7,7 +7,13 @@ WARNING = 'WARNING'
 ERROR = 'ERROR'
 CRITICAL = 'CRITICAL'
 
-LEVELS = (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# NOTE: the following two log "levels" represent output captured from stdout and
+# stderr respectively, and don't strictly speaking fall within the standard
+# log level hierarchy.
+STDOUT = 'STDOUT'
+STDERR = 'STDERR'
+
+LEVELS = (DEBUG, INFO, WARNING, ERROR, CRITICAL, STDOUT, STDERR)
 
 def from_stdlib_levelno(level, default=None):
     return {
