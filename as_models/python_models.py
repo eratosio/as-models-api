@@ -35,6 +35,18 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     context = Context(manifest, job_request, args, updater)
     implementation(context)
 
+def session_for_auth(auth):
+	from requests import Session
+	
+	session = Session()
+	
+	if isinstance(auth, HTTPKeyAuth):
+		session.params[auth.header] = auth.key
+	else:
+		session.auth = auth
+	
+	return session
+
 class StreamPort(BaseStreamPort):
     def __init__(self, context, **kwargs):
         self._stream_id = kwargs.pop('streamId')
@@ -176,10 +188,7 @@ class Context(BaseContext):
             
             url, _, _, auth = resolve_service_config(**self._thredds_config)
             
-            session = requests.Session()
-            session.auth = auth
-            
-            self._thredds_client = Client(url, session)
+            self._thredds_client = Client(url, session_for_auth(auth))
         
         return self._thredds_client
     
@@ -190,10 +199,7 @@ class Context(BaseContext):
             
             url, _, _, auth = resolve_service_config(**self._thredds_upload_config)
             
-            session = requests.Session()
-            session.auth = auth
-            
-            self._thredds_upload_client = Client(url, session)
+            self._thredds_upload_client = Client(url, session_for_auth(auth))
         
         return self._thredds_upload_client
     

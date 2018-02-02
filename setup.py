@@ -20,6 +20,9 @@ setup(
     # TODO: url = 'https://bitbucket.csiro.au/...',
     packages = find_packages(),
     long_description = read('readme.md'),
+    install_requires = [
+        'flask'
+    ],
     classifiers = [
         'Development Status :: 3 - Alpha',
         'Topic :: Scientific/Engineering :: Information Analysis',

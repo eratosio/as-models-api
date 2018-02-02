@@ -4,9 +4,13 @@ from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import Sentinel
 import log_levels, python_models, r_models
 
-import bottle, datetime, json, logging, multiprocessing, os, sys, time, traceback
+import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
+from flask import Flask, jsonify, make_response, request
 
 _SENTINEL = Sentinel()
+
+def _signalterm_handler(signal, stack):
+    exit(0)
 
 def _determine_runtime_type(entrypoint, args):
     try:
@@ -16,11 +20,6 @@ def _determine_runtime_type(entrypoint, args):
             return 'python'
         elif r_models.is_valid_entrypoint(entrypoint):
             return 'r'
-
-def _init_logging(handler, log_level):
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
-    root_logger.addHandler(handler)
 
 class _Updater(object):
     def __init__(self, sender):
@@ -103,13 +102,17 @@ class _JobProcess(object):
         self._logger = logger
     
     def __call__(self):
+        signal.signal(signal.SIGTERM, _signalterm_handler)
+        
         updater = _Updater(self._sender)
         
         # Initialise logging.
         sys.stdout = StreamRedirect(sys.stdout, updater, log_levels.STDOUT)
         sys.stderr = StreamRedirect(sys.stderr, updater, log_levels.STDERR)
         log_level = self._job_request.get('logLevel', self._args.get('log_level', 'INFO'))
-        _init_logging(_JobProcessLogHandler(updater), log_level)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(_JobProcessLogHandler(updater))
+        root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
         logger = logging.getLogger('JobProcess')
         
         # Run the model!
@@ -168,86 +171,117 @@ class _WebAPILogHandler(logging.Handler):
             'logger': record.name
         })
 
-class WebAPI(bottle.Bottle):
-    def __init__(self, args):
-        super(WebAPI, self).__init__()
-        
-        self._manifest, self._entrypoint = WebAPI._load_entrypoint(args.pop('model'))
-        print self._manifest, self._entrypoint
-        
-        self._host = os.environ.get('MODEL_HOST', '0.0.0.0')
-        self._port = args.pop('port', os.environ.get('MODEL_PORT', 8080))
-        self._runtime_type = _determine_runtime_type(self._entrypoint, args) # TODO: gracefully handle invalid runtime types
-        self._args = args
-        
-        self._process = self._receiver = None
-        self._state = { 'state': PENDING }
-        
-        _init_logging(_WebAPILogHandler(self._state), self._args.get('log_level', 'INFO'))
-        self._logger = logging.getLogger('WebAPI')
-        
-        self.get('/', callback=self._handle_get)
-        self.post('/', callback=self._handle_post)
+app = Flask(__name__)
+
+_process = _receiver = None
+_state = { 'state': PENDING }
+
+_root_logger = logging.getLogger()
+_root_logger.addHandler(_WebAPILogHandler(_state))
+
+_logger = logging.getLogger('WebAPI')
+
+logging.getLogger('werkzeug').setLevel(logging.ERROR) # disable unwanted Flask HTTP request logs
+
+def _load_entrypoint(path):
+    path = os.path.abspath(path)
     
-    def run(self):
-        super(WebAPI, self).run(host=self._host, port=self._port, quiet=True)
+    # Locate manifest, if possible.
+    if os.path.isfile(path) and (os.path.basename(path) == 'manifest.json'):
+        manifest_path = path
+    elif os.path.isdir(path):
+        manifest_path = os.path.join(path, 'manifest.json')
+    else:
+        manifest_path = None
     
-    def _handle_get(self):
-        return self._update_state()
+    # Try to load the manifest.
+    manifest = None
+    if manifest_path is not None:
+        try:
+            with open(manifest_path, 'r') as f:
+                manifest = json.load(f)
+        except IOError as e:
+            raise IOError('Unable to open manifest file {}: {}'.format(manifest_path, e))
     
-    def _handle_post(self):
-        if self._process is not None:
-            return bottle.HTTPResponse({ 'error': 'Cannot submit new job - job already running.' }, status=409)
+    # If a manifest was loaded, validate it and resolve the actual entrypoint.
+    if manifest_path is not None:
+        # TODO: validate manifest.
         
-        job_request = bottle.request.json
-        if 'modelId' not in job_request:
-            return bottle.HTTPResponse({'error', 'Required property "modelId" is missing.'}, status=400)
-        
-        # TODO: validate request against the manifest (e.g. all required ports satisfied).
-        
-        self._receiver, sender = multiprocessing.Pipe(False)
-        self._process = multiprocessing.Process(target=_JobProcess(self._entrypoint, self._manifest, self._runtime_type, self._args, job_request, sender, self._logger))
-        self._process.start()
-        
-        return bottle.HTTPResponse(self._update_state(), status=201)
+        entrypoint = os.path.join(os.path.dirname(manifest_path), manifest['entrypoint'])
+    else:
+        entrypoint = path
     
-    def _update_state(self):
-        if (None not in (self._process, self._receiver)) and (self._state.get('state', None) in (None, PENDING, RUNNING)):
-            try:
-                while self._receiver.poll():
-                    update = self._receiver.recv()
-                    self._state.setdefault('log', []).extend(update.pop('log', []))
-                    self._state.update(update)
-            except EOFError as e:
-                print e # TODO: handle better
-        
-        return self._state
+    return manifest, entrypoint
+
+def _get_state():
+    global _process, _receiver, _state
     
-    @staticmethod
-    def _load_entrypoint(path):
-        # Locate manifest, if possible.
-        if os.path.isfile(path) and (os.path.basename(path) == 'manifest.json'):
-            manifest_path = path
-        elif os.path.isdir(path):
-            manifest_path = os.path.join(path, 'manifest.json')
-        else:
-            manifest_path = None
-        
-        # Try to load the manifest.
-        manifest = None
-        if manifest_path is not None:
-            try:
-                with open(manifest_path, 'r') as f:
-                    manifest = json.load(f)
-            except IOError as e:
-                raise IOError('Unable to open manifest file {}: {}'.format(manifest_path, e))
-        
-        # If a manifest was loaded, validate it and resolve the actual entrypoint.
-        if manifest_path is not None:
-            # TODO: validate manifest.
-            
-            entrypoint = os.path.join(os.path.dirname(manifest_path), manifest['entrypoint'])
-        else:
-            entrypoint = path
-        
-        return manifest, entrypoint
+    if (None not in (_process, _receiver)) and (_state.get('state', None) in (None, PENDING, RUNNING)):
+        try:
+            while _receiver.poll():
+                update = _receiver.recv()
+                _state.setdefault('log', []).extend(update.pop('log', []))
+                _state.update(update)
+        except EOFError as e:
+            print e # TODO: handle better
+    
+    return _state
+
+@app.route('/', methods=['GET'])
+def _get_root():
+    return jsonify(_get_state())
+
+@app.route('/', methods=['post'])
+def _post_root():
+    global _process, _receiver, _logger, _root_logger
+    
+    if _process is not None:
+        return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
+    
+    job_request = request.get_json(force=True, silent=True) or {}
+    if 'modelId' not in job_request:
+        return make_response(jsonify({'error', 'Required property "modelId" is missing.'}), 400)
+    
+    args = app.config.get('args', {})
+    manifest, entrypoint = _load_entrypoint(app.config['model_path'])
+    runtime_type = _determine_runtime_type(entrypoint, args)
+    
+    _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
+    
+    # TODO: validate request against the manifest (e.g. all required ports satisfied).
+    
+    _receiver, sender = multiprocessing.Pipe(False)
+    _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
+    _process.start()
+    
+    return _get_root()
+
+@app.route('/terminate', methods=['post'])
+def _post_terminate():
+    global _process, _logger, _state
+    
+    args = request.get_json(force=True, silent=True) or {}
+    timeout = args.get('timeout', 0.0)
+    
+    _logger.info('Received terminate message. Waiting %.2f seconds for model to terminate.', timeout)
+    
+    _process.terminate()
+    _process.join(timeout)
+    
+    if _process.is_alive():
+        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
+        os.kill(_process.pid, signal.SIGKILL)
+    else:
+        _logger.info('Model shut down cleanly.')
+    
+    if _state['state'] not in (COMPLETE, FAILED):
+        _state['state'] = TERMINATED
+    
+    # Make best-effort attempt the web API.
+    func = request.environ.get('werkzeug.server.shutdown')
+    if callable(func):
+        func()
+    else:
+        _logger.warning('Unable to terminate model API (shutdown hook unavailable).');
+    
+    return _get_root()

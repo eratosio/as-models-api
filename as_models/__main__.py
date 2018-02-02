@@ -1,12 +1,18 @@
 
 from log_levels import INFO
 
-import argparse
+import argparse, os
 
 def host(args):
-    from web_api import WebAPI
+    from web_api import app
     
-    WebAPI(args).run()
+    app.config['model_path'] = args.pop('model')
+    app.config['args'] = args
+    
+    host = os.environ.get('MODEL_HOST', '0.0.0.0')
+    port = args.pop('port', os.environ.get('MODEL_PORT', 8080))
+    
+    app.run(host=host, port=port)
 
 # Create main arg parser.
 parser = argparse.ArgumentParser(description='Analysis Services Model Integration Engine')
