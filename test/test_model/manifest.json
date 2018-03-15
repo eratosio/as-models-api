@@ -1,0 +1,37 @@
+{
+    "baseImage": "6737f90e-a795-4e5b-923c-1513d2914720",
+    "organisationId": "test_org",
+    "groupIds": [ "test_group" ],
+    "entrypoint": "model.py",
+    "dependencies": [
+        {
+            "name": "requests",
+            "provider": "PIP"
+        }
+    ],
+    "models": [
+        {
+            "id": "test_model",
+            "name": "Test Model",
+            "version": "0.0.1",
+            "description": "",
+            "method": "",
+            "ports": [
+                {
+                    "portName": "input",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "output"
+                }
+            ]
+        }
+    ]
+}
