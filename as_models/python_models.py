@@ -1,5 +1,5 @@
 
-from context import BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
+from context import BasePort, BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
 import models
 from util import resolve_service_config
@@ -16,6 +16,7 @@ def is_valid_entrypoint(entrypoint):
 
 def run_model(entrypoint, manifest, job_request, args, updater):
     model_id = job_request['modelId']
+    model = manifest.models[model_id]
     
     # Load the model's module.
     model_dir, model_file = os.path.split(entrypoint)
@@ -32,8 +33,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
     
     # Run the callable.
-    context = Context(manifest, job_request, args, updater)
-    implementation(context)
+    implementation(Context(model, job_request, args, updater))
 
 def session_for_auth(auth):
 	from requests import Session
@@ -47,73 +47,46 @@ def session_for_auth(auth):
 	
 	return session
 
-class StreamPort(BaseStreamPort):
-    def __init__(self, context, **kwargs):
-        self._stream_id = kwargs.pop('streamId')
+class PythonPort(BasePort):
+    def __init__(self, context, port, binding):
+        super(PythonPort, self).__init__(context, port)
         
-        super(StreamPort, self).__init__(context, **kwargs)
+        self._was_supplied = binding is not None
+        self._binding = binding or {}
     
+    @property
+    def was_supplied(self):
+        return self._was_supplied
+
+class StreamPort(PythonPort, BaseStreamPort):
     @property
     def stream_id(self):
-        return self._stream_id
-    
-    @property
-    def was_supplied(self):
-        return self._stream_id is not None
+        return self._binding.get('streamId')
 
-class MultistreamPort(BaseMultistreamPort):
-    def __init__(self, context, **kwargs):
-        self._stream_ids = kwargs.pop('streamIds')
-        
-        super(MultistreamPort, self).__init__(context, **kwargs)
-    
+class MultistreamPort(PythonPort, BaseMultistreamPort):
     @property
     def stream_ids(self):
-        return self._stream_ids
-    
-    @property
-    def was_supplied(self):
-        return self._stream_ids is not None
+        return self._binding.get('streamIds')
 
-class DocumentPort(BaseDocumentPort):
-    def __init__(self, context, **kwargs):
-        self._value = kwargs.pop('document', None)
-        self._supplied = self._value is not None
-        
-        super(DocumentPort, self).__init__(context, **kwargs)
-    
+class DocumentPort(PythonPort, BaseDocumentPort):
     @property
     def value(self):
-        return self._value
+        return self._binding.get('document')
     
     @value.setter
     def value(self, value):
-        if value != self._value:
-            self._value = value
+        if value != self.value:
+            self._binding['document'] = value
             self._context.update(modified_documents={ self.name: self.value })
-    
-    @property
-    def was_supplied(self):
-        return self._supplied
 
-class GridPort(BaseGridPort):
-    def __init__(self, context, **kwargs):
-        self._catalog_url = kwargs.pop('catalog', None)
-        self._dataset_path = kwargs.pop('dataset', None)
-        
-        super(GridPort, self).__init__(context, **kwargs)
-    
+class GridPort(PythonPort, BaseGridPort):
     @property
     def catalog_url(self):
-        return self._catalog_url
+        return self._binding['catalog']
     
     @property
     def dataset_path(self):
-        return self._dataset_path
-    
-    @property
-    def was_supplied(self):
-        return self._dataset_path is not None
+        return self._binding['dataset']
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root):
@@ -125,29 +98,27 @@ class _SCApiProxy(API):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
 
 class Context(BaseContext):
-    def __init__(self, manifest, job_request, args, updater):
+    _port_type_map = {
+        STREAM_PORT: StreamPort,
+        MULTISTREAM_PORT: MultistreamPort,
+        DOCUMENT_PORT: DocumentPort,
+        GRID_PORT: GridPort
+    }
+    
+    def __init__(self, model, job_request, args, updater):
         super(Context, self).__init__()
         
         self._model_id = job_request['modelId']
         self._updater = updater
         self._debug = args.get('debug', False) or job_request.get('debug', False)
         
-        # Add supplied ports.
-        for name,v in job_request.get('ports', {}).iteritems():
-            type = v.get('type')
-            
-            if type == STREAM_PORT:
-                self.ports._add(StreamPort(self, name=name, **v))
-            elif type == MULTISTREAM_PORT:
-                self.ports._add(MultistreamPort(self, name=name, **v))
-            elif type == DOCUMENT_PORT:
-                self.ports._add(DocumentPort(self, name=name, **v))
-            elif type == GRID_PORT:
-                self.ports._add(GridPort(self, name=name, **v))
-            else:
-                raise ValueError('Unsupported port type "{}"'.format(type))
-        
-        # TODO: Add unsupplied ports.
+        bindings = job_request.get('ports', {})
+        for port in model.ports:
+            try:
+                port_type = Context._port_type_map[port.type]
+                self.ports._add(port_type(self, port, bindings.get(port.name)))
+            except KeyError:
+                raise ValueError('Unsupported port type "{}"'.format(port.type))
         
         self._sensor_config = job_request.get('sensorCloudConfiguration')
         self._analysis_config = job_request.get('analysisServicesConfiguration')

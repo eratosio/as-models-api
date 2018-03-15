@@ -7,23 +7,21 @@ from abc import ABCMeta, abstractmethod, abstractproperty
 class BasePort(object):
     __metaclass__ = ABCMeta
     
-    def __init__(self, context, name, type, direction):
+    def __init__(self, context, port):
         self.__context = context
-        self.__name = name
-        self.__type = type
-        self.__direction = direction
+        self.__port = port
     
     @property
     def type(self):
-        return self.__type
+        return self.__port.type
     
     @property
     def name(self):
-        return self.__name
+        return self.__port.name
     
     @property
     def direction(self):
-        return self.__direction
+        return self.__port.direction
     
     @property
     def _context(self):
@@ -66,8 +64,8 @@ class BaseDocumentPort(BasePort):
         pass
 
 class BaseGridPort(BasePort):
-    def __init__(self, context, name, type, direction):
-        super(BaseGridPort, self).__init__(context, name, type, direction)
+    def __init__(self, context, port):
+        super(BaseGridPort, self).__init__(context, port)
         
         self.__dataset = None
     
@@ -134,7 +132,7 @@ class Ports(Mapping):
         try:
             return self.__ports[attr]
         except KeyError:
-            raise AttributeError()
+            raise AttributeError('Unknown attribute "{}"'.format(attr))
     
     def _add(self, port): # For use by context classes.
         self.__ports[port.name] = port

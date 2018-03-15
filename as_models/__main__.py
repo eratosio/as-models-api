@@ -10,7 +10,7 @@ def host(args):
     app.config['args'] = args
     
     host = os.environ.get('MODEL_HOST', '0.0.0.0')
-    port = args.pop('port', os.environ.get('MODEL_PORT', 8080))
+    port = int(args.pop('port', os.environ.get('MODEL_PORT', 8080)))
     
     app.run(host=host, port=port)
 

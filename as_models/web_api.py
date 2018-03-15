@@ -2,6 +2,7 @@
 from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
 from model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from sentinel import Sentinel
+from manifest import Manifest
 import log_levels, python_models, r_models
 
 import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
@@ -132,13 +133,19 @@ class _JobProcess(object):
             # TODO: this could probably be neater.
             mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
             results = {}
-            for port_name, port in self._job_request['ports'].iteritems(): # TODO: iterate over model ports instead?
-                if port['type'] == STREAM_PORT and port.get('streamId', None) in mod_streams:
-                    results[port_name] = { 'type': port['type'] }
-                elif port['type'] == MULTISTREAM_PORT and not mod_streams.isdisjoint(port.get('streamIds', [])):
-                    results[port_name] = { 'type': port['type'], 'outdatedStreams': list(mod_streams.intersection(port.get('streamIds', []))) }
-                elif port['type'] == DOCUMENT_PORT and port_name in mod_docs:
-                    results[port_name] = { 'type': port['type'], 'document': mod_docs[port_name] }
+            bindings = self._job_request['ports']
+            for port in self._manifest.models[model_id].ports:
+                try:
+                    binding = bindings[port.name]
+                except KeyError:
+                    continue
+                
+                if port.type == STREAM_PORT and binding.get('streamId') in mod_streams:
+                    results[port.name] = { 'type': port.type }
+                elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
+                    results[port.name] = { 'type': port.type, 'outdatedStreams': list(mod_streams.intersection(binding.get('streamIds', []))) }
+                elif port.type == DOCUMENT_PORT and port.name in mod_docs:
+                    results[port.name] = { 'type': port.type, 'document': mod_docs[port.name] }
             
             self._sender.send({
                 'state': COMPLETE,
@@ -187,31 +194,22 @@ def _load_entrypoint(path):
     path = os.path.abspath(path)
     
     # Locate manifest, if possible.
-    if os.path.isfile(path) and (os.path.basename(path) == 'manifest.json'):
-        manifest_path = path
+    if os.path.isfile(path):
+        head, tail = os.path.split(path)
+        manifest_path = path if (tail == 'manifest.json') else os.path.join(head, 'manifest.json')
     elif os.path.isdir(path):
         manifest_path = os.path.join(path, 'manifest.json')
     else:
-        manifest_path = None
+        raise RuntimeError('Unable to load model from path {} - path does not exist.'.format(path))
     
     # Try to load the manifest.
-    manifest = None
-    if manifest_path is not None:
-        try:
-            with open(manifest_path, 'r') as f:
-                manifest = json.load(f)
-        except IOError as e:
-            raise IOError('Unable to open manifest file {}: {}'.format(manifest_path, e))
+    try:
+        with open(manifest_path, 'r') as f:
+            manifest = Manifest(json.load(f))
+    except Exception as e:
+        raise RuntimeError('Failed to read manifest for model at {}: {}'.format(path, e))
     
-    # If a manifest was loaded, validate it and resolve the actual entrypoint.
-    if manifest_path is not None:
-        # TODO: validate manifest.
-        
-        entrypoint = os.path.join(os.path.dirname(manifest_path), manifest['entrypoint'])
-    else:
-        entrypoint = path
-    
-    return manifest, entrypoint
+    return manifest, os.path.join(os.path.dirname(manifest_path), manifest.entrypoint)
 
 def _get_state():
     global _process, _receiver, _state
@@ -231,7 +229,7 @@ def _get_state():
 def _get_root():
     return jsonify(_get_state())
 
-@app.route('/', methods=['post'])
+@app.route('/', methods=['POST'])
 def _post_root():
     global _process, _receiver, _logger, _root_logger
     
@@ -239,16 +237,26 @@ def _post_root():
         return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
     
     job_request = request.get_json(force=True, silent=True) or {}
-    if 'modelId' not in job_request:
-        return make_response(jsonify({'error', 'Required property "modelId" is missing.'}), 400)
+    try:
+        model_id = job_request['modelId']
+    except KeyError:
+        return make_response(jsonify({'error': 'Required property "modelId" is missing.'}), 400)
+    
+    manifest, entrypoint = _load_entrypoint(app.config['model_path'])
+    
+    try:
+        model = manifest.models[model_id]
+    except KeyError:
+        return make_response(jsonify({'error': 'Unknown model "{}".'.format(model_id)}), 500)
+    
+    missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
+    if missing_ports:
+        return make_response(jsonify({'error': 'Missing bindings for required port(s): {}'.format(','.join(missing_ports))}), 500)
     
     args = app.config.get('args', {})
-    manifest, entrypoint = _load_entrypoint(app.config['model_path'])
     runtime_type = _determine_runtime_type(entrypoint, args)
     
     _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
-    
-    # TODO: validate request against the manifest (e.g. all required ports satisfied).
     
     _receiver, sender = multiprocessing.Pipe(False)
     _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
@@ -256,7 +264,7 @@ def _post_root():
     
     return _get_root()
 
-@app.route('/terminate', methods=['post'])
+@app.route('/terminate', methods=['POST'])
 def _post_terminate():
     global _process, _logger, _state
     
