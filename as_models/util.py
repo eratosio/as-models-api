@@ -6,7 +6,7 @@ try:
 except ImportError:
     import urllib.parse as urlparse
 
-def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, apiRoot=None, apiKey=None):
+def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, apiRoot=None, apiKey=None, verify=True):
     api_root = api_root or apiRoot
     api_key = api_key or apiKey
     
@@ -27,4 +27,4 @@ def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=N
         host = '{}:{}'.format(host.partition(':')[0], port)
     url = urlparse.urlunparse((scheme, host, api_root) + parts[3:])
     
-    return url, host, api_root, auth
+    return url, host, api_root, auth, verify

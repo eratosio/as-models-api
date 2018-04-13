@@ -2,6 +2,7 @@
 from context import BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
 from util import resolve_service_config
 import ports
+from manifest import Port
 
 from sensetdp.api import API
 
@@ -32,10 +33,10 @@ def ssl_verification_disabled():
     requests.Session.request = old_request
 
 class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazily.
-    def __init__(self, context, auth, host, api_root):
+    def __init__(self, context, auth, host, api_root, verify=True):
         self._context = context
         
-        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root)
+        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify)
     
     def create_observations(self, results, streamid):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
@@ -44,7 +45,8 @@ class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazil
 
 class StreamPort(BaseStreamPort):
     def __init__(self, context, name, type, direction, stream_id):
-        super(StreamPort, self).__init__(context, name, type, direction)
+        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
+        super(StreamPort, self).__init__(context, port)
         
         self._stream_id = stream_id
     
@@ -58,7 +60,8 @@ class StreamPort(BaseStreamPort):
 
 class MultistreamPort(BaseMultistreamPort):
     def __init__(self, context, name, type, direction, stream_ids):
-        super(MultistreamPort, self).__init__(context, name, type, direction)
+        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
+        super(MultistreamPort, self).__init__(context, port)
         
         self._stream_ids = stream_ids
     
@@ -72,7 +75,8 @@ class MultistreamPort(BaseMultistreamPort):
 
 class DocumentPort(BaseDocumentPort):
     def __init__(self, context, name, type, direction, value):
-        super(DocumentPort, self).__init__(context, name, type, direction)
+        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
+        super(DocumentPort, self).__init__(context, port)
         
         self._value = value
         self._supplied = value is not None
@@ -93,7 +97,8 @@ class DocumentPort(BaseDocumentPort):
 
 class GridPort(BaseGridPort):
     def __init__(self, context, name, type, direction, catalog_url, dataset_path):
-        super(GridPort, self).__init__(context, name, type, direction)
+        port = Port({'portName': name, 'direction': direction, 'type': type})
+        super(GridPort, self).__init__(context, port)
         
         self._catalog_url = catalog_url
         self._dataset_path = dataset_path
@@ -136,8 +141,8 @@ class Context(BaseContext):
         
         return self
     
-    def configure_sensor_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-        self._sensor_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+    def configure_sensor_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, verify=True):
+        self._sensor_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
         return self
     
     def configure_analysis_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
@@ -152,9 +157,9 @@ class Context(BaseContext):
         self._thredds_upload_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
         return self
     
-    def configure_clients(self, url='', scheme=None, host=None, port=None, username=None, password=None, api_key=None, sensor_path=None, analysis_path=None, thredds_path=None, thredds_upload_path=None):
+    def configure_clients(self, url='', scheme=None, host=None, port=None, username=None, password=None, api_key=None, sensor_path=None, analysis_path=None, thredds_path=None, thredds_upload_path=None, verify=True):
         if sensor_path:
-            self.configure_sensor_client(url, scheme, host, sensor_path, port, username, password, api_key)
+            self.configure_sensor_client(url, scheme, host, sensor_path, port, username, password, api_key, verify)
         if analysis_path:
             self.configure_analysis_client(url, scheme, host, analysis_path, port, username, password, api_key)
         if thredds_path:
@@ -187,8 +192,8 @@ class Context(BaseContext):
     @property
     def sensor_client(self):
         if self._sensor_client is None and self._sensor_config is not None:
-            _, host, api_root, auth = self._sensor_config
-            self._sensor_client = _SCApiProxy(self, auth, host, api_root)
+            _, host, api_root, auth, verify = self._sensor_config
+            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify)
         
         return self._sensor_client
     
@@ -197,7 +202,7 @@ class Context(BaseContext):
         if self._analysis_client is None and self._analysis_config is not None:
             from as_client import Client
             
-            url, _, _, auth = self._analysis_config
+            url, _, _, authy = self._analysis_config
             self._analysis_client = Client(url, auth)
         
         return self._analysis_client
