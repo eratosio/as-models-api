@@ -35,10 +35,11 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     # Run the callable.
     implementation(Context(model, job_request, args, updater))
 
-def session_for_auth(auth):
+def session_for_auth(auth, verify=None):
 	from requests import Session
 	
 	session = Session()
+    session.verify = verify
 	
 	if isinstance(auth, HTTPKeyAuth):
 		session.params[auth.header] = auth.key
@@ -89,10 +90,10 @@ class GridPort(PythonPort, BaseGridPort):
         return self._binding['dataset']
 
 class _SCApiProxy(API):
-    def __init__(self, context, auth, host, api_root):
+    def __init__(self, context, auth, host, api_root, verify=None):
         self._context = context
         
-        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root)
+        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify)
     
     def create_observations(self, results, streamid):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
@@ -137,8 +138,8 @@ class Context(BaseContext):
     @property
     def sensor_client(self):
         if self._sensor_client is None and self._sensor_config is not None:
-            _, host, api_root, auth = resolve_service_config(**self._sensor_config)
-            self._sensor_client = _SCApiProxy(self, auth, host, api_root)
+            _, host, api_root, auth, verify = resolve_service_config(**self._sensor_config)
+            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify)
         
         return self._sensor_client
     
@@ -147,8 +148,8 @@ class Context(BaseContext):
         if self._analysis_client is None and self._analysis_config is not None:
             from as_client import Client as ASClient
             
-            url, _, _, auth = resolve_service_config(**self._analysis_config)
-            self._analysis_client = ASClient(url, auth)
+            url, _, _, auth, verify = resolve_service_config(**self._analysis_config)
+            self._analysis_client = ASClient(url, session=session_for_auth(auth, verify))
         
         return self._analysis_client
     
@@ -157,9 +158,9 @@ class Context(BaseContext):
         if self._thredds_client is None and self._thredds_config is not None:
             from tds_client import Client
             
-            url, _, _, auth = resolve_service_config(**self._thredds_config)
+            url, _, _, auth, verify = resolve_service_config(**self._thredds_config)
             
-            self._thredds_client = Client(url, session_for_auth(auth))
+            self._thredds_client = Client(url, session_for_auth(auth, verify))
         
         return self._thredds_client
     
@@ -168,9 +169,9 @@ class Context(BaseContext):
         if self._thredds_upload_client is None and self._thredds_upload_config is not None:
             from tds_upload import Client
             
-            url, _, _, auth = resolve_service_config(**self._thredds_upload_config)
+            url, _, _, auth, verify = resolve_service_config(**self._thredds_upload_config)
             
-            self._thredds_upload_client = Client(url, session_for_auth(auth))
+            self._thredds_upload_client = Client(url, session_for_auth(auth, verify))
         
         return self._thredds_upload_client
     

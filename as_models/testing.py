@@ -202,7 +202,7 @@ class Context(BaseContext):
         if self._analysis_client is None and self._analysis_config is not None:
             from as_client import Client
             
-            url, _, _, authy = self._analysis_config
+            url, _, _, auth, verify = self._analysis_config
             self._analysis_client = Client(url, auth)
         
         return self._analysis_client
@@ -213,10 +213,11 @@ class Context(BaseContext):
             from tds_client import Client
             from requests import Session
             
-            url, _, _, auth = self._thredds_config
+            url, _, _, auth, verify = self._thredds_config
             
             session = Session()
             session.auth = auth
+            session.verify = verify
             
             self._thredds_client = Client(url, session)
         
@@ -228,10 +229,11 @@ class Context(BaseContext):
             from tds_upload import Client
             from requests import Session
             
-            url, _, _, auth = self._thredds_upload_config
+            url, _, _, auth, verify = self._thredds_upload_config
             
             session = Session()
             session.auth = auth
+            session.verify = verify
             
             self._thredds_upload_client = Client(url, session)
         
