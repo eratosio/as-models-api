@@ -139,7 +139,7 @@ class Context(BaseContext):
     def sensor_client(self):
         if self._sensor_client is None and self._sensor_config is not None:
             _, host, api_root, auth, verify = resolve_service_config(**self._sensor_config)
-            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify)
+            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify, timeout=300)
         
         return self._sensor_client
     
