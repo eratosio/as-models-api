@@ -93,7 +93,7 @@ class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
         self._context = context
         
-        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify)
+        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify, timeout=300)
     
     def create_observations(self, results, streamid):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
@@ -139,7 +139,7 @@ class Context(BaseContext):
     def sensor_client(self):
         if self._sensor_client is None and self._sensor_config is not None:
             _, host, api_root, auth, verify = resolve_service_config(**self._sensor_config)
-            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify, timeout=300)
+            self._sensor_client = _SCApiProxy(self, auth, host, api_root, verify)
         
         return self._sensor_client
     
