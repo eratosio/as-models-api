@@ -36,17 +36,17 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     implementation(Context(model, job_request, args, updater))
 
 def session_for_auth(auth, verify=None):
-	from requests import Session
-	
-	session = Session()
+    from requests import Session
+    
+    session = Session()
     session.verify = verify
-	
-	if isinstance(auth, HTTPKeyAuth):
-		session.params[auth.header] = auth.key
-	else:
-		session.auth = auth
-	
-	return session
+    
+    if isinstance(auth, HTTPKeyAuth):
+        session.params[auth.header] = auth.key
+    else:
+        session.auth = auth
+    
+    return session
 
 class PythonPort(BasePort):
     def __init__(self, context, port, binding):
