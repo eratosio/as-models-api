@@ -97,7 +97,7 @@ class DocumentPort(BaseDocumentPort):
 
 class GridPort(BaseGridPort):
     def __init__(self, context, name, type, direction, catalog_url, dataset_path):
-        port = Port({'portName': name, 'direction': direction, 'type': type})
+        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
         super(GridPort, self).__init__(context, port)
         
         self._catalog_url = catalog_url
