@@ -4,7 +4,7 @@ from util import resolve_service_config
 import ports
 from manifest import Port
 
-from sensetdp.api import API
+from senaps_sensor.api import API
 
 import contextlib, requests, warnings
 
