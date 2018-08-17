@@ -4,8 +4,8 @@ from ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
 import models
 from util import resolve_service_config
 
-from sensetdp.api import API
-from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
+from senaps_sensor.api import API
+from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
 import importlib, os, requests, sys
 

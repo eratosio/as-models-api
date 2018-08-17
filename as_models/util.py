@@ -1,5 +1,5 @@
 
-from sensetdp.auth import HTTPBasicAuth, HTTPKeyAuth
+from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
 try:
     import urlparse
