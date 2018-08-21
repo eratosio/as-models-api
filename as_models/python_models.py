@@ -33,6 +33,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
     
     # Run the callable.
+    updater.update() # Marks the job as running.
     implementation(Context(model, job_request, args, updater))
 
 def session_for_auth(auth, verify=None):
