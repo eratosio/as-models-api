@@ -225,6 +225,14 @@ def _get_state():
     
     return _state
 
+def _handle_failed_child_process(sender):
+    _, exitcode = os.wait()
+    
+    sender.send({
+        'state': FAILED,
+        'message': 'Model process terminated abnormally with exit code {}.'.format(exitcode)
+    })
+
 @app.route('/', methods=['GET'])
 def _get_root():
     return jsonify(_get_state())
@@ -259,6 +267,9 @@ def _post_root():
     _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
     
     _receiver, sender = multiprocessing.Pipe(False)
+    
+    signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
+    
     _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
     
