@@ -21,13 +21,12 @@ setup(
     packages = find_packages(),
     long_description = read('readme.md'),
     install_requires = [
-        'flask',
-        'git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git#egg=senaps_sensor'
+        'flask'
     ],
     classifiers = [
         'Development Status :: 3 - Alpha',
         'Topic :: Scientific/Engineering :: Information Analysis',
-        # TODO: 'License :: OSI Approved :: BSD License',
+        'License :: OSI Approved :: BSD License',
         'Intended Audience :: Developers',
         'Natural Language :: English',
         'Operating System :: POSIX',
