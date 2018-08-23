@@ -22,7 +22,7 @@ setup(
     long_description = read('readme.md'),
     install_requires = [
         'flask',
-        'senaps_sensor'
+        'git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git#egg=senaps_sensor'
     ],
     classifiers = [
         'Development Status :: 3 - Alpha',
