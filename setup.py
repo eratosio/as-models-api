@@ -21,7 +21,8 @@ setup(
     packages = find_packages(),
     long_description = read('readme.md'),
     install_requires = [
-        'flask'
+        'flask',
+        'senaps_sensor'
     ],
     classifiers = [
         'Development Status :: 3 - Alpha',
