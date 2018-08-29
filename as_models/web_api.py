@@ -226,13 +226,22 @@ def _get_state():
     return _state
 
 def _handle_failed_child_process(sender):
-    pid, exitcode = os.wait()
-    
-    if (pid == _process.pid) and not _model_complete.value:
-        sender.send({
-            'state': FAILED,
-            'message': 'Model process terminated abnormally with exit code {}.'.format(exitcode)
-        })
+    while True:
+        # Attempt to reap an exited child process.
+        try:
+            pid, exit_code = os.waitpid(-1, os.WNOHANG)
+        except OSError:
+            break
+        
+        # If the child process is the model process and it hasn't completed
+        # properly, flag a failure.
+        if (pid == _process.pid) and not _model_complete.value:
+            sender.send({
+                'state': FAILED,
+                'message': 'Model process terminated abnormally with exit code {}.'.format(exit_code)
+            })
+        elif pid == 0:
+            break
 
 @app.route('/', methods=['GET'])
 def _get_root():
