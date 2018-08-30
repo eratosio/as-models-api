@@ -59,6 +59,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         context['thredds_config'] = r_thredds_config    
     
     # Run the implementation.
+    updater.update() # Marks the job as running.
     implementation(ListVector(context))
 
 def _convert_ports(ports):

@@ -127,6 +127,7 @@ class _JobProcess(object):
                 r_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
             else:
                 raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
+            _model_complete.value = 1
             logger.debug('Implementation method for model %s returned.', model_id)
             
             # Update ports (generate "results").
@@ -182,6 +183,7 @@ app = Flask(__name__)
 
 _process = _receiver = None
 _state = { 'state': PENDING }
+_model_complete = multiprocessing.Value('i', 0)
 
 _root_logger = logging.getLogger()
 _root_logger.addHandler(_WebAPILogHandler(_state))
@@ -212,8 +214,6 @@ def _load_entrypoint(path):
     return manifest, os.path.join(os.path.dirname(manifest_path), manifest.entrypoint)
 
 def _get_state():
-    global _process, _receiver, _state
-    
     if (None not in (_process, _receiver)) and (_state.get('state', None) in (None, PENDING, RUNNING)):
         try:
             while _receiver.poll():
@@ -225,13 +225,31 @@ def _get_state():
     
     return _state
 
+def _handle_failed_child_process(sender):
+    while True:
+        # Attempt to reap an exited child process.
+        try:
+            pid, exit_code = os.waitpid(-1, os.WNOHANG)
+        except OSError:
+            break
+        
+        # If the child process is the model process and it hasn't completed
+        # properly, flag a failure.
+        if (pid == _process.pid) and not _model_complete.value:
+            sender.send({
+                'state': FAILED,
+                'message': 'Model process terminated abnormally with exit code {}.'.format(exit_code)
+            })
+        elif pid == 0:
+            break
+
 @app.route('/', methods=['GET'])
 def _get_root():
     return jsonify(_get_state())
 
 @app.route('/', methods=['POST'])
 def _post_root():
-    global _process, _receiver, _logger, _root_logger
+    global _process, _receiver
     
     if _process is not None:
         return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
@@ -259,6 +277,9 @@ def _post_root():
     _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
     
     _receiver, sender = multiprocessing.Pipe(False)
+    
+    signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
+    
     _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
     
@@ -266,8 +287,6 @@ def _post_root():
 
 @app.route('/terminate', methods=['POST'])
 def _post_terminate():
-    global _process, _logger, _state
-    
     args = request.get_json(force=True, silent=True) or {}
     timeout = args.get('timeout', 0.0)
     
