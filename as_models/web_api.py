@@ -278,7 +278,8 @@ def _post_root():
     
     _receiver, sender = multiprocessing.Pipe(False)
     
-    signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
+    #CS: Dsiabling for now to test graincast workflows.
+    #signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
     
     _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
