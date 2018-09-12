@@ -21,6 +21,10 @@ class ContextTests(unittest.TestCase):
             'modelId': 'test',
             'ports': {
                 'b': { 'document': port_b_document }
+            },
+            'sensorCloudConfiguration': {
+                "url": "https://52.64.57.4/api/sensor/v2",
+                "apiKey": "714debe3bfc3464dc6364dbc5455f326"
             }
         }
         context = Context(model, job_request, {}, None)
@@ -32,3 +36,8 @@ class ContextTests(unittest.TestCase):
         port_b = context.ports['b']
         self.assertTrue(port_b.was_supplied)
         self.assertEqual(port_b_document, port_b.get(default_document))
+
+        self.assertEqual(context.sensor_client.connect_retries, 10)
+        self.assertEqual(context.sensor_client.status_retries, 10)
+        self.assertEqual(context.sensor_client.read_retries, 10)
+        self.assertEqual(context.sensor_client.timeout, 300)

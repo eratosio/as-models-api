@@ -1,2 +1,3 @@
 git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git#egg=senaps_sensor
 flask
+enum34
