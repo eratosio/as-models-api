@@ -108,7 +108,7 @@ class BaseGridPort(BasePort):
         if self.__dataset is None:
             from tds_client import Dataset
             
-            client = self._context.thredds_client if self.catalog_url is None else self._context.thredds_client()
+            client = self._context.thredds_client if self.catalog_url is None else self._context.thredds_client
             
             if client is not None:
                 self.__dataset = Dataset.from_url(self.dataset_path, client=client)
