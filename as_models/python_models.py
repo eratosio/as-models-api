@@ -168,7 +168,7 @@ class Context(BaseContext):
     @property
     def thredds_upload_client(self):
         if self._thredds_upload_client is None and self._thredds_upload_config is not None:
-            from tds_upload import Client
+            from tdm import Client
             
             url, _, _, auth, verify = resolve_service_config(**self._thredds_upload_config)
             
