@@ -94,7 +94,7 @@ class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
         self._context = context
         
-        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify, timeout=300)
+        super(_SCApiProxy, self).__init__(auth, host=host, api_root=api_root, verify=verify, timeout=300, connect_retries=10, read_retries=10, status_retries=10)
     
     def create_observations(self, results, streamid):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
@@ -168,7 +168,7 @@ class Context(BaseContext):
     @property
     def thredds_upload_client(self):
         if self._thredds_upload_client is None and self._thredds_upload_config is not None:
-            from tds_upload import Client
+            from tdm import Client
             
             url, _, _, auth, verify = resolve_service_config(**self._thredds_upload_config)
             

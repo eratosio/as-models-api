@@ -145,16 +145,16 @@ class Context(BaseContext):
         self._sensor_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
         return self
     
-    def configure_analysis_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-        self._analysis_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+    def configure_analysis_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, verify=True):
+        self._analysis_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
         return self
     
-    def configure_thredds_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-        self._thredds_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+    def configure_thredds_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, verify=True):
+        self._thredds_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
         return self
     
-    def configure_thredds_upload_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None):
-        self._thredds_upload_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key)
+    def configure_thredds_upload_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, verify=True):
+        self._thredds_upload_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
         return self
     
     def configure_clients(self, url='', scheme=None, host=None, port=None, username=None, password=None, api_key=None, sensor_path=None, analysis_path=None, thredds_path=None, thredds_upload_path=None, verify=True):
@@ -163,9 +163,9 @@ class Context(BaseContext):
         if analysis_path:
             self.configure_analysis_client(url, scheme, host, analysis_path, port, username, password, api_key)
         if thredds_path:
-            self.configure_thredds_client(url, scheme, host, thredds_path, port, username, password, api_key)
+            self.configure_thredds_client(url, scheme, host, thredds_path, port, username, password, api_key, verify)
         if thredds_upload_path:
-            self.configure_thredds_upload_client(url, scheme, host, thredds_upload_path, port, username, password, api_key)
+            self.configure_thredds_upload_client(url, scheme, host, thredds_upload_path, port, username, password, api_key, verify)
     
     def update(self, message=None, progress=None, modified_streams=[], modified_documents={}):
         # TODO: figure out a good way of handling the "message" and "progress" parameters
@@ -226,7 +226,7 @@ class Context(BaseContext):
     @property
     def thredds_upload_client(self):
         if self._thredds_upload_client is None and self._thredds_upload_config is not None:
-            from tds_upload import Client
+            from tdm import Client
             from requests import Session
             
             url, _, _, auth, verify = self._thredds_upload_config
