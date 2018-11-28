@@ -41,11 +41,7 @@ def session_for_auth(auth, verify=None):
     
     session = Session()
     session.verify = verify
-    
-    if isinstance(auth, HTTPKeyAuth):
-        session.params[auth.header] = auth.key
-    else:
-        session.auth = auth
+    session.auth = auth
     
     return session
 
