@@ -1,17 +1,17 @@
 
-from log_levels import INFO
+from .log_levels import INFO
 
 import argparse, os
 
 def host(args):
-    from web_api import app
-    
+    from .web_api import app
+
     app.config['model_path'] = args.pop('model')
     app.config['args'] = args
-    
+
     host = os.environ.get('MODEL_HOST', '0.0.0.0')
     port = int(args.pop('port', os.environ.get('MODEL_PORT', 8080)))
-    
+
     app.run(host=host, port=port)
 
 # Create main arg parser.
