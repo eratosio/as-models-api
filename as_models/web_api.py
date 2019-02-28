@@ -50,6 +50,11 @@ class _Updater(object):
         if level is not None and level not in log_levels.LEVELS:
             raise ValueError('Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
 
+        message = message.rstrip() if message else None
+
+        if not message:
+            return
+
         if timestamp is None:
             timestamp = datetime.datetime.utcnow().isoformat() + 'Z'
 
@@ -272,7 +277,7 @@ def _post_root():
     missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
 
     if missing_ports:
-        _logger.warn('Missing bindings for "required" model port(s): {}'.format(', '.join(missing_ports)))
+        _logger.warn('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
 
     args = app.config.get('args', {})
     runtime_type = _determine_runtime_type(entrypoint, args)

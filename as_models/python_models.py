@@ -48,7 +48,7 @@ def session_for_auth(auth, verify=None):
 
 class PythonPort(BasePort):
     def __init__(self, context, port, binding):
-        super(PythonPort, self).__init__(context, port)
+        BasePort.__init__(self, context, port)
 
         self._was_supplied = binding is not None
         self._binding = binding or {}
@@ -91,13 +91,7 @@ class GridPort(PythonPort, BaseGridPort):
 class CollectionPort(PythonPort, BaseCollectionPort):
     def __init__(self, context, port, binding, ports):
         PythonPort.__init__(self, context, port, binding)
-        BaseCollectionPort.__init__(self, context, port)
-        self.__ports = ports or []
-
-    @property
-    def ports(self):
-        return self.__ports
-
+        BaseCollectionPort.__init__(self, context, port, ports)
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):

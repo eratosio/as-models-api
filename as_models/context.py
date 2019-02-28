@@ -64,12 +64,24 @@ class BaseDocumentPort(BasePort):
         pass
 
 class BaseCollectionPort(BasePort):
-    def get(self, default=None):
-        return self.ports if self.was_supplied else (default or [])
+    def __init__(self, context, port, ports):
+        super(BaseCollectionPort, self).__init__(context, port)
+        self.__ports = ports
 
-    @abstractproperty
-    def ports(self):
-        pass
+    def get(self, default=None):
+        return self.__ports if self.was_supplied else (default or [])
+
+    def __getitem__(self, i):
+        return self.get()[i]
+
+    def __len__(self):
+        return len(self.get())
+
+    def __iter__(self):
+        return iter(self.get())
+
+    def __str__(self):
+        return ','.join(map(str, self.get()))
 
 
 class BaseGridPort(BasePort):

@@ -8,6 +8,36 @@ def required_ports_model_in1_out1(context):
 def test_model(context):
     pass
 
+
+def summarise(port, type):
+    if port:
+        actions = {
+            'document': lambda port: port.value or '',
+            'document_collection': lambda ports: [actions['document'](x) for x in ports],
+            'stream': lambda port: port.stream_id or '',
+            'stream_collection': lambda ports: [actions['stream'](x) for x in ports],
+            'grid': lambda port: (port.catalog_url, port.dataset_path) if port.catalog_url else '',
+            'grid_collection': lambda ports: [actions['grid'](x) for x in ports],
+         }
+
+        print '%s: %s' % (port.name, actions[type](port))
+
+
+
 def all_port_types_model(context):
-    # print (context.ports['input_documents'].ports[0].value)
+    summarise(context.ports['input_document'], 'document')
+    summarise(context.ports['output_document'], 'document')
+    summarise(context.ports['input_documents'], 'document_collection')
+    summarise(context.ports['output_documents'], 'document_collection')
+
+    summarise(context.ports['input_stream'], 'stream')
+    summarise(context.ports['output_stream'], 'stream')
+    summarise(context.ports['input_streams'], 'stream_collection')
+    summarise(context.ports['output_streams'], 'stream_collection')
+
+    summarise(context.ports['input_grid'], 'grid')
+    summarise(context.ports['output_grid'], 'grid')
+    summarise(context.ports['input_grids'], 'grid_collection')
+    summarise(context.ports['output_grids'], 'grid_collection')
+
     pass
