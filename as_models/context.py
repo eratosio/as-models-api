@@ -63,6 +63,15 @@ class BaseDocumentPort(BasePort):
     def value(self, value):
         pass
 
+class BaseCollectionPort(BasePort):
+    def get(self, default=None):
+        return self.ports if self.was_supplied else (default or [])
+
+    @abstractproperty
+    def ports(self):
+        pass
+
+
 class BaseGridPort(BasePort):
     def __init__(self, context, port):
         super(BaseGridPort, self).__init__(context, port)
@@ -115,6 +124,7 @@ class BaseGridPort(BasePort):
                 self.__dataset = Dataset(catalog, self.dataset_path)
 
         return self.__dataset
+
 
 class Ports(Mapping):
     def __init__(self):

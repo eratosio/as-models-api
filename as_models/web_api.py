@@ -1,7 +1,7 @@
 
 from __future__ import print_function
 
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT
+from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
 from .manifest import Manifest
@@ -270,8 +270,9 @@ def _post_root():
         return make_response(jsonify({'error': 'Unknown model "{}".'.format(model_id)}), 500)
 
     missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
+
     if missing_ports:
-        return make_response(jsonify({'error': 'Missing bindings for required port(s): {}'.format(','.join(missing_ports))}), 500)
+        _logger.warn('Missing bindings for "required" model port(s): {}'.format(', '.join(missing_ports)))
 
     args = app.config.get('args', {})
     runtime_type = _determine_runtime_type(entrypoint, args)

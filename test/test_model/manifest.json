@@ -11,9 +11,40 @@
     ],
     "models": [
         {
+            "id": "noop",
+            "name": "Nop model",
+            "version": "0",
+            "description": "",
+            "method": "",
+            "ports": []
+        },
+        {
+            "id": "required_ports_model_in1_out1",
+            "name": "Required ports model",
+            "version": "0",
+            "description": "",
+            "method": "",
+            "ports": [
+                {
+                    "portName": "in1",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "out1",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "output"
+                }
+            ]
+        },
+        {
             "id": "test_model",
             "name": "Test Model",
-            "version": "0.0.1",
+            "version": "0",
             "description": "",
             "method": "",
             "ports": [
@@ -28,6 +59,104 @@
                     "portName": "output",
                     "required": true,
                     "type": "document",
+                    "description": "",
+                    "direction": "output"
+                }
+            ]
+        },
+        {
+            "id": "all_port_types_model",
+            "name": "Test Model with all combinations of ports",
+            "version": "0.0.1",
+            "description": "",
+            "method": "",
+            "ports": [
+                {
+                    "portName": "input_document",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_document",
+                    "required": true,
+                    "type": "document",
+                    "description": "",
+                    "direction": "output"
+                },
+
+                {
+                    "portName": "input_stream",
+                    "required": true,
+                    "type": "stream",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_stream",
+                    "required": true,
+                    "type": "stream",
+                    "description": "",
+                    "direction": "output"
+                },
+
+                {
+                    "portName": "input_grid",
+                    "required": true,
+                    "type": "grid",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_grid",
+                    "required": true,
+                    "type": "grid",
+                    "description": "",
+                    "direction": "output"
+                },
+
+                {
+                    "portName": "input_documents",
+                    "required": true,
+                    "type": "document[]",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_documents",
+                    "required": true,
+                    "type": "document[]",
+                    "description": "",
+                    "direction": "output"
+                },
+
+                {
+                    "portName": "input_streams",
+                    "required": true,
+                    "type": "stream[]",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_streams",
+                    "required": true,
+                    "type": "stream[]",
+                    "description": "",
+                    "direction": "output"
+                },
+
+                {
+                    "portName": "input_grids",
+                    "required": true,
+                    "type": "grid[]",
+                    "description": "",
+                    "direction": "input"
+                },
+                {
+                    "portName": "output_grids",
+                    "required": true,
+                    "type": "grid[]",
                     "description": "",
                     "direction": "output"
                 }

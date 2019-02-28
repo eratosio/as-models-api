@@ -1,3 +1,6 @@
+import json
+
+from requests import HTTPError
 
 from as_models.manifest import Manifest
 from as_models.web_api import _load_entrypoint
@@ -24,9 +27,9 @@ class TestModelClient(object):
     def __init__(self, port):
         self._base_url = 'http://localhost:{}/'.format(port)
     
-    def start(self): # TODO: model params
+    def start(self, payload=None): # TODO: model params
         input_document = 'test_document'
-        payload = {
+        p = payload or {
             'modelId': 'test_model',
             'ports': {
                 'input': { 'document': input_document },
@@ -34,7 +37,7 @@ class TestModelClient(object):
             }
         }
         
-        return self._request('POST', json=payload)
+        return self._request('POST', json=p)
 
     def poll(self):
         return self._request('GET')
@@ -46,7 +49,11 @@ class TestModelClient(object):
         url = self._base_url + path
         
         response = requests.request(method, url, *args, **kwargs)
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except HTTPError as e:
+            raise RuntimeError(e.response.json())
         
         return response.json()
 
@@ -94,8 +101,69 @@ class HostTests(unittest.TestCase):
             # Poll for model completion.
             while response['state'] not in ('COMPLETE', 'FAILED'):
                 response = model.poll()
+                print(json.dumps(response['log'], indent=4, sort_keys=True))
+                print(response.get('exception', ''))
+
             self.assertEqual('COMPLETE', response['state'])
             
             # Allow up to 10 seconds for the model to terminate.
             response = model.terminate(10.0)
             self.assertEqual('Model shut down cleanly.', response['log'][-1]['message'])
+
+    def test_collection_ports(self):
+        with TestModel(8000) as model:
+            # Send job start request.
+            response = model.start({
+                "modelId": "all_port_types_model",
+                "ports": {
+                    "input_documents": { "ports": [{ "document": "foo" }, { "document": "bar" }] }
+                }
+            })
+
+            self.assertEqual('PENDING', response['state'])
+
+            # Poll for model completion.
+            while response['state'] not in ('COMPLETE', 'FAILED'):
+                response = model.poll()
+                print(json.dumps(response['log'], indent=4, sort_keys=True))
+                print(response.get('exception', ''))
+
+            self.assertEqual('COMPLETE', response['state'])
+
+            # Allow up to 10 seconds for the model to terminate.
+            response = model.terminate(10.0)
+            self.assertEqual('Model shut down cleanly.', response['log'][-1]['message'])
+
+    def test_missing_required_ports_should_warn_not_fail(self):
+        with TestModel(8000) as model:
+            # Send job start request.
+            response = model.start({
+                'modelId': 'required_ports_model_in1_out1',
+                'ports': {
+                    'in1': { 'value': 'assigned value ok' }
+                    # out1 is the missing port and should warn but not fail...
+                }
+            })
+
+            self.assertEqual('PENDING', response['state'])
+
+            # Poll for model completion.
+            while response['state'] not in ('COMPLETE', 'FAILED'):
+                response = model.poll()
+                print(json.dumps(response['log'], indent=4, sort_keys=True))
+                print(response.get('exception', ''))
+
+            self.assertEqual('COMPLETE', response['state'])
+
+            # Allow up to 10 seconds for the model to terminate.
+            response = model.terminate(10.0)
+
+            first_log_message = response['log'][0]['message']
+
+            for term in ['Missing', 'required', 'port', 'out1']:
+                self.assertIn(term, first_log_message)
+
+            for term in ['in1']: # in1 is fine, shouldn't be reported on...
+                self.assertNotIn(term, first_log_message)
+
+            self.assertEqual('WARNING', response['log'][0]['level'])

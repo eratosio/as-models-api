@@ -1,6 +1,7 @@
 
-from .context import BasePort, BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
+from .context import BasePort, BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext, \
+    BaseCollectionPort
+from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT
 from . import models
 from .util import resolve_service_config
 
@@ -80,11 +81,23 @@ class DocumentPort(PythonPort, BaseDocumentPort):
 class GridPort(PythonPort, BaseGridPort):
     @property
     def catalog_url(self):
-        return self._binding['catalog']
+        return self._binding.get('catalog')
 
     @property
     def dataset_path(self):
-        return self._binding['dataset']
+        return self._binding.get('dataset')
+
+
+class CollectionPort(PythonPort, BaseCollectionPort):
+    def __init__(self, context, port, binding, ports):
+        PythonPort.__init__(self, context, port, binding)
+        BaseCollectionPort.__init__(self, context, port)
+        self.__ports = ports or []
+
+    @property
+    def ports(self):
+        return self.__ports
+
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
@@ -100,8 +113,15 @@ class Context(BaseContext):
         STREAM_PORT: StreamPort,
         MULTISTREAM_PORT: MultistreamPort,
         DOCUMENT_PORT: DocumentPort,
-        GRID_PORT: GridPort
+        GRID_PORT: GridPort,
+        STREAM_COLLECTION_PORT: StreamPort,
+        DOCUMENT_COLLECTION_PORT: DocumentPort,
+        GRID_COLLECTION_PORT: GridPort
     }
+
+    @staticmethod
+    def is_collection_port(porttype):
+        return porttype == STREAM_COLLECTION_PORT or porttype == GRID_COLLECTION_PORT or porttype == DOCUMENT_COLLECTION_PORT
 
     def __init__(self, model, job_request, args, updater):
         super(Context, self).__init__()
@@ -113,8 +133,15 @@ class Context(BaseContext):
         bindings = job_request.get('ports', {})
         for port in model.ports:
             try:
-                port_type = Context._port_type_map[port.type]
-                self.ports._add(port_type(self, port, bindings.get(port.name)))
+                binding = bindings.get(port.name, None)
+
+                if self.is_collection_port(port.type):
+                    inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding.get('ports', [])] if binding else []
+                    self.ports._add(CollectionPort(self, port, binding, inner_ports))
+                else:
+                    port_type = Context._port_type_map[port.type]
+                    self.ports._add(port_type(self, port, binding))
+
             except KeyError:
                 raise ValueError('Unsupported port type "{}"'.format(port.type))
 
