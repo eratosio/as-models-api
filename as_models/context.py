@@ -1,8 +1,9 @@
 
 from .ports import OUTPUT_PORT
+from .util import urlparse
 
-from collections import Mapping
 from abc import ABCMeta, abstractmethod, abstractproperty
+from collections import Mapping
 
 ABC = ABCMeta('ABC', (object,), {}) # compatible with Python 2 *and* 3
 
@@ -149,14 +150,17 @@ class BaseContext(ABC):
     def _get_thredds_client(self, url):
         from tds_client import Client
 
-        # Ensure "main" client is pre-cached
-        self._cache_thredds_client(self.thredds_client)
+        self._cache_thredds_client(self.thredds_client) # Ensure the "main" client is pre-cached.
 
         return self._cache_thredds_client(Client(url))
 
     def _cache_thredds_client(self, client):
         if client is not None:
-            return self.__thredds_clients.setdefault(client.context_url, client)
+            # NOTE: following implementation assumes only one Thredds instance
+            # per host. This may or may not be true, and may need tweaking in
+            # the future.
+            _, netloc, _, _, _, _ = urlparse.urlparse(client.context_url)
+            return self.__thredds_clients.setdefault(netloc, client)
 
     @property
     def ports(self):
