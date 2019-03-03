@@ -96,23 +96,23 @@ class ContextTests(unittest.TestCase):
 
         port_a = context.ports['a']
         self.assertTrue(port_a.was_supplied)
-        self.assertEqual(2, len(port_a.ports))
-        self.assertEqual(port_a_document, port_a.ports[0].value)
-        self.assertEqual(port_b_document, port_a.ports[1].value)
+        self.assertEqual(2, len(port_a))
+        self.assertEqual(port_a_document, port_a[0].value)
+        self.assertEqual(port_b_document, port_a[1].value)
 
         port_b = context.ports['b']
         self.assertTrue(port_b.was_supplied)
         self.assertEqual(2, len(port_b.get(None)))
-        self.assertEqual('stream1', port_b.ports[0].stream_id)
-        self.assertEqual('stream2', port_b.ports[1].stream_id)
+        self.assertEqual('stream1', port_b[0].stream_id)
+        self.assertEqual('stream2', port_b[1].stream_id)
 
         port_c = context.ports['c']
         self.assertTrue(port_c.was_supplied)
         self.assertEqual(2, len(port_c.get(None)))
-        self.assertEqual('cat1.xml', port_c.ports[0].catalog_url)
-        self.assertEqual('data1.nc', port_c.ports[0].dataset_path)
-        self.assertEqual('cat2.xml', port_c.ports[1].catalog_url)
-        self.assertEqual('data2.nc', port_c.ports[1].dataset_path)
+        self.assertEqual('cat1.xml', port_c[0].catalog_url)
+        self.assertEqual('data1.nc', port_c[0].dataset_path)
+        self.assertEqual('cat2.xml', port_c[1].catalog_url)
+        self.assertEqual('data2.nc', port_c[1].dataset_path)
 
         self.assertEqual(context.sensor_client.connect_retries, 10)
         self.assertEqual(context.sensor_client.status_retries, 10)

@@ -116,7 +116,7 @@ class HostTests(unittest.TestCase):
             response = model.start({
                 "modelId": "all_port_types_model",
                 "ports": {
-                    "input_documents": { "ports": [{ "document": "foo" }, { "document": "bar" }] },
+                    "input_documents": { "ports": [{ "value": "foo" }, { "value": "bar" }] },
                     "input_streams": { "ports": [{"streamId": "s1"}, {"streamId": "s2"}]}
                 }
             })
