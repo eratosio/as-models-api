@@ -100,6 +100,9 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(port_a_document, port_a[0].value)
         self.assertEqual(port_b_document, port_a[1].value)
 
+        for p in port_a:
+            self.assertTrue(p.was_supplied);
+
         port_b = context.ports['b']
         self.assertTrue(port_b.was_supplied)
         self.assertEqual(2, len(port_b.get(None)))

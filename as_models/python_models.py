@@ -76,7 +76,7 @@ class DocumentPort(PythonPort, BaseDocumentPort):
     def value(self, value):
         if value != self.value:
             self._binding['document'] = value
-            self._context.update(modified_documents={ self.name: self.value })
+            self._context.update(modified_documents=[{ 'name': self.name, 'document': self.value, 'index': getattr(self, 'index', None) }])
 
 class GridPort(PythonPort, BaseGridPort):
     @property
@@ -130,7 +130,8 @@ class Context(BaseContext):
                 binding = bindings.get(port.name, None)
 
                 if self.is_collection_port(port.type):
-                    inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding.get('ports', [])] if binding else []
+                    binding_ports = binding.get('ports', []) if binding else []
+                    inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding_ports]
                     self.ports._add(CollectionPort(self, port, binding, inner_ports))
                 else:
                     port_type = Context._port_type_map[port.type]

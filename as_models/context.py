@@ -67,7 +67,13 @@ class BaseDocumentPort(BasePort):
 class BaseCollectionPort(BasePort):
     def __init__(self, context, port, ports):
         super(BaseCollectionPort, self).__init__(context, port)
+
+        for idx, p in enumerate(ports): # necessary to map back to response...
+            ports[idx].index = idx
+
         self.__ports = ports
+
+
 
     def get(self, default=None):
         return self.__ports if self.was_supplied else (default or [])
@@ -83,6 +89,9 @@ class BaseCollectionPort(BasePort):
 
     def __str__(self):
         return ','.join(map(str, self.get()))
+
+    def __repr__(self):
+        return repr(self.get())
 
 
 class BaseGridPort(BasePort):

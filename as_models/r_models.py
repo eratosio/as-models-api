@@ -1,6 +1,9 @@
 
 from .ports import DOCUMENT_PORT
 from .sentinel import Sentinel
+from rpy2.robjects import r, conversion
+from rpy2.rinterface import NULL
+from rpy2.robjects.vectors import ListVector, Array
 
 import os
 
@@ -20,10 +23,6 @@ def is_valid_entrypoint(entrypoint):
     return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.r')
 
 def run_model(entrypoint, manifest, job_request, args, updater):
-    from rpy2.robjects import r, conversion
-    from rpy2.rinterface import NULL
-    from rpy2.robjects.vectors import ListVector
-
     model_id = job_request['modelId']
 
     # Load the model's module.
@@ -72,13 +71,20 @@ def _convert_ports(ports):
 
     result = {}
     for port_name, port_config in ports.items():
-        direction = port_config.pop('direction').lower()
+        ports = port_config
 
-        result[str(port_name)] = ListVector(dict(
-            name=port_name,
-            direction=direction,
-            **{ str(k):v for k,v in port_config.items() }
-        ))
+        if 'ports' in port_config:
+            items = port_config['ports']
+
+            for idx, i in enumerate(items):
+                i['index'] = idx
+
+            ports = map(lambda i: ListVector({ str(k):v for k,v in i.items()}), items)
+
+            result[str(port_name)] = ListVector(dict(name=port_name, ports=ports))
+
+        else:
+            result[str(port_name)] = ListVector(dict(name=port_name, **{ str(k):v for k,v in port_config.items()}))
 
     return ListVector(result)
 

@@ -25,19 +25,25 @@ def summarise(port, type):
 
 
 def all_port_types_model(context):
-    summarise(context.ports['input_document'], 'document')
-    summarise(context.ports['output_document'], 'document')
+    # summarise(context.ports['input_document'], 'document')
+    # summarise(context.ports['output_document'], 'document')
     summarise(context.ports['input_documents'], 'document_collection')
-    summarise(context.ports['output_documents'], 'document_collection')
+    # summarise(context.ports['output_documents'], 'document_collection')
+    #
+    # summarise(context.ports['input_stream'], 'stream')
+    # summarise(context.ports['output_stream'], 'stream')
+    # summarise(context.ports['input_streams'], 'stream_collection')
+    # summarise(context.ports['output_streams'], 'stream_collection')
+    #
+    # summarise(context.ports['input_grid'], 'grid')
+    # summarise(context.ports['output_grid'], 'grid')
+    # summarise(context.ports['input_grids'], 'grid_collection')
+    # summarise(context.ports['output_grids'], 'grid_collection')
 
-    summarise(context.ports['input_stream'], 'stream')
-    summarise(context.ports['output_stream'], 'stream')
-    summarise(context.ports['input_streams'], 'stream_collection')
-    summarise(context.ports['output_streams'], 'stream_collection')
+    for (idx, doc) in enumerate(context.ports['input_documents']):
+        print('processing input_documents[%d] = %s' % (idx, doc.value))
+        new_value = '%s %d' % (doc.value, idx)
+        print('writing output_documents[%d].value = %s' % (idx, new_value))
+        context.ports['output_documents'][idx].value = new_value
 
-    summarise(context.ports['input_grid'], 'grid')
-    summarise(context.ports['output_grid'], 'grid')
-    summarise(context.ports['input_grids'], 'grid_collection')
-    summarise(context.ports['output_grids'], 'grid_collection')
-
-    pass
+    context.ports['output_document'].value = context.ports['input_document'].value

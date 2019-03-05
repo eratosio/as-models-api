@@ -1,7 +1,7 @@
 
 from __future__ import print_function
 
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT
+from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
 from .manifest import Manifest
@@ -32,7 +32,7 @@ class _Updater(object):
         self._modified_streams = set()
         self._modified_documents = {}
 
-    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
+    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents=[]):
         update = { k:v for k,v in {
             'state': RUNNING,
             'message': message,
@@ -40,7 +40,18 @@ class _Updater(object):
         }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL)) }
 
         self._modified_streams.update(modified_streams)
-        self._modified_documents.update(modified_documents)
+
+        for mod_doc in modified_documents:
+            port_name = mod_doc['name']
+            if mod_doc.get('index', None):
+                # must be a collection update...
+                if port_name not in self._modified_documents:
+                    self._modified_documents[port_name] = []
+                self._modified_documents[port_name].append(mod_doc)
+            else:
+                self._modified_documents.update({ port_name: mod_doc['document'] })
+
+        # self._modified_documents.update(modified_documents)
 
         if update:
             self._state.update(update)
@@ -139,21 +150,15 @@ class _JobProcess(object):
 
             # Update ports (generate "results").
             # TODO: this could probably be neater.
-            mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
+            mod_docs = updater._modified_documents
             results = {}
-            bindings = self._job_request['ports']
-            for port in self._manifest.models[model_id].ports:
-                try:
-                    binding = bindings[port.name]
-                except KeyError:
-                    continue
 
-                if port.type == STREAM_PORT and binding.get('streamId') in mod_streams:
-                    results[port.name] = { 'type': port.type }
-                elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
-                    results[port.name] = { 'type': port.type, 'outdatedStreams': list(mod_streams.intersection(binding.get('streamIds', []))) }
-                elif port.type == DOCUMENT_PORT and port.name in mod_docs:
-                    results[port.name] = { 'type': port.type, 'document': mod_docs[port.name] }
+            for port in self._manifest.models[model_id].ports:
+                if port.type == DOCUMENT_PORT and port.name in mod_docs:
+                    results[port.name] = { 'type': port.type, 'document': mod_docs[port.name]}
+                elif port.type == DOCUMENT_COLLECTION_PORT and port.name in mod_docs:
+                    print(mod_docs[port.name])
+                    results[port.name] = {'type': port.type, 'ports': [{'document': document['document'], 'index': document['index'] } for document in mod_docs[port.name]]}
 
             self._sender.send({
                 'state': COMPLETE,
@@ -161,7 +166,7 @@ class _JobProcess(object):
                 'results': results
             })
         except BaseException as e:
-            logger.critical('Model failed with exception')
+            logger.critical('Model failed with exception: %s', e.message)
 
             self._sender.send({
                 'state': FAILED,
