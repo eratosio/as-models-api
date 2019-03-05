@@ -1,9 +1,6 @@
 
 from .ports import DOCUMENT_PORT
 from .sentinel import Sentinel
-from rpy2.robjects import r, conversion
-from rpy2.rinterface import NULL
-from rpy2.robjects.vectors import ListVector, Array
 
 import os
 
@@ -23,6 +20,10 @@ def is_valid_entrypoint(entrypoint):
     return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.r')
 
 def run_model(entrypoint, manifest, job_request, args, updater):
+    from rpy2.robjects import r, conversion
+    from rpy2.rinterface import NULL
+    from rpy2.robjects.vectors import ListVector, Array
+
     model_id = job_request['modelId']
 
     # Load the model's module.
