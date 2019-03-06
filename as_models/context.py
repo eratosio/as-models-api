@@ -57,6 +57,10 @@ class BaseDocumentPort(BasePort):
         return self.value if self.was_supplied else default
 
     @abstractproperty
+    def document_id(self):
+        pass
+
+    @abstractproperty
     def value(self):
         pass
 

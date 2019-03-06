@@ -27,7 +27,7 @@ def summarise(port, type):
 def all_port_types_model(context):
     # summarise(context.ports['input_document'], 'document')
     # summarise(context.ports['output_document'], 'document')
-    summarise(context.ports['input_documents'], 'document_collection')
+    # summarise(context.ports['input_documents'], 'document_collection')
     # summarise(context.ports['output_documents'], 'document_collection')
     #
     # summarise(context.ports['input_stream'], 'stream')
@@ -46,4 +46,4 @@ def all_port_types_model(context):
         print('writing output_documents[%d].value = %s' % (idx, new_value))
         context.ports['output_documents'][idx].value = new_value
 
-    context.ports['output_document'].value = context.ports['input_document'].value
+    context.ports['output_document'].value = context.ports['input_document'].value + ' updated'

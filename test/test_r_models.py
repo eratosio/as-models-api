@@ -36,7 +36,7 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(job_request.get('ports', {}))
+        ports = _convert_ports(model, job_request.get('ports', {}))
 
         doc1 = ports.rx2('b')
         stream1 = ports.rx2('d')
@@ -50,7 +50,17 @@ class ContextTests(unittest.TestCase):
 
 
     def test_collection_ports(self):
-
+        model = Model({
+            'id': 'test',
+            'ports': [
+                {'portName': 'a', 'type': DOCUMENT_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'b', 'type': DOCUMENT_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'c', 'type': STREAM_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'd', 'type': STREAM_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'e', 'type': GRID_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'f', 'type': GRID_PORT, 'direction': INPUT_PORT, 'required': False}
+            ]
+        })
         job_request = {
             'modelId': 'test',
             'ports': {
@@ -64,26 +74,29 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(job_request.get('ports', {}))
+        ports = _convert_ports(model, job_request.get('ports', {}))
 
-        doc1 = ports.rx2('a').rx2('ports')[0]
-        doc2 = ports.rx2('a').rx2('ports')[1]
+        doc1 = ports.rx2('a')[0]
+        doc2 = ports.rx2('a')[1]
+        print(doc1)
 
+
+        # print (doc1)
         self.assertEqual('\"doc1\"', doc1.rx2('document').r_repr())
         self.assertEqual(0L, long(doc1.rx2('index').r_repr()))
         self.assertEqual('\"doc2\"', str(doc2.rx2('document').r_repr()))
         self.assertEqual(1L, long(doc2.rx2('index').r_repr()))
 
-        stream1 = ports.rx2('b').rx2('ports')[0]
-        stream2 = ports.rx2('b').rx2('ports')[1]
+        stream1 = ports.rx2('b')[0]
+        stream2 = ports.rx2('b')[1]
 
         self.assertEqual('\"stream1\"', stream1.rx2('streamId').r_repr())
         self.assertEqual(0L, long(stream1.rx2('index').r_repr()))
         self.assertEqual('\"stream2\"', str(stream2.rx2('streamId').r_repr()))
         self.assertEqual(1L, long(stream2.rx2('index').r_repr()))
 
-        grid1 = ports.rx2('c').rx2('ports')[0]
-        grid2 = ports.rx2('c').rx2('ports')[1]
+        grid1 = ports.rx2('c')[0]
+        grid2 = ports.rx2('c')[1]
 
         self.assertEqual('\"cat1.xml\"', grid1.rx2('catalog').r_repr())
         self.assertEqual('\"data1.nc\"', grid1.rx2('dataset').r_repr())

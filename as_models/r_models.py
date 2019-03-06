@@ -1,5 +1,5 @@
 
-from .ports import DOCUMENT_PORT
+from .ports import DOCUMENT_PORT, OUTPUT_PORT
 from .sentinel import Sentinel
 
 import os
@@ -22,10 +22,11 @@ def is_valid_entrypoint(entrypoint):
 def run_model(entrypoint, manifest, job_request, args, updater):
     from rpy2.robjects import r, conversion
     from rpy2.rinterface import NULL
-    from rpy2.robjects.vectors import ListVector, Array
+    from rpy2.robjects.vectors import ListVector
+    import rpy2.rinterface as ri
 
     model_id = job_request['modelId']
-
+    model = manifest.models[model_id]
     # Load the model's module.
     module = r.source(entrypoint)
 
@@ -46,8 +47,8 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
     r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
     r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration', None))
-    r_ports = _convert_ports(job_request.get('ports', {}))
-    r_update = _convert_update(updater.update)
+    r_ports = _convert_ports(model, job_request.get('ports', {}))
+    r_update = _convert_update(updater.update, model, job_request.get('ports', {}))
     r_logger = _convert_logger(updater.log)
 
     # Create context object.
@@ -67,25 +68,27 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     updater.update() # Marks the job as running.
     implementation(ListVector(context))
 
-def _convert_ports(ports):
+def _convert_ports(model, port_bindings):
     from rpy2.robjects.vectors import ListVector
 
     result = {}
-    for port_name, port_config in ports.items():
-        ports = port_config
+    for port in model.ports:
+        port_name = port.name
+        port_config = port_bindings.get(port_name, {})
 
         if 'ports' in port_config:
-            items = port_config['ports']
+            inner_ports = port_config['ports']
 
-            for idx, i in enumerate(items):
-                i['index'] = idx
+            # to preserve order when returning results, inject the collection index
+            for idx, port in enumerate(inner_ports):
+                port['index'] = idx
 
-            ports = map(lambda i: ListVector({ str(k):v for k,v in i.items()}), items)
-
-            result[str(port_name)] = ListVector(dict(name=port_name, ports=ports))
-
+            result[str(port_name)] = map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports)
         else:
-            result[str(port_name)] = ListVector(dict(name=port_name, **{ str(k):v for k,v in port_config.items()}))
+            result[str(port_name)] = ListVector(dict(
+                name=port_name,
+                direction=port.direction,
+                **{ str(k):v for k,v in port_config.items()}))
 
     return ListVector(result)
 
@@ -115,13 +118,13 @@ def _convert_service_config(config):
 
         return ListVector(result)
 
-def _convert_update(update):
+def _convert_update(update, model, port_bindings):
     import rpy2.rinterface as ri
     from rpy2.robjects.vectors import Vector, ListVector
 
     def wrapper(message=_SENTINEL, progress=_SENTINEL, modified_streams=_SENTINEL, modified_documents=_SENTINEL):
         update_kwargs = {}
-
+        
         if message not in (_SENTINEL, ri.NULL):
             update_kwargs['message'] = _extract_scalar(message)
         if progress not in (_SENTINEL, ri.NULL):
@@ -133,7 +136,7 @@ def _convert_update(update):
             for k,v in ListVector(modified_documents).items():
                 if not isinstance(v, Vector) or len(v) != 1:
                     raise ValueError('Value for document "{}" must be a scalar.'.format(k))
-                mod_docs[k] = str(_extract_scalar(v))
+                mod_docs[k] = {'document': str(_extract_scalar(v))}
 
         update(**update_kwargs)
 

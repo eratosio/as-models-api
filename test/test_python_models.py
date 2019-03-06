@@ -83,7 +83,7 @@ class ContextTests(unittest.TestCase):
         job_request = {
             'modelId': 'test',
             'ports': {
-                'a': {'ports': [{'document': port_a_document}, {'document': port_b_document}]},
+                'a': {'ports': [{'documentId': 'doc1', 'document': port_a_document}, {'documentId': 'doc2', 'document': port_b_document}]},
                 'b': {'ports': [{'streamId': 'stream1'}, {'streamId': 'stream2'}]},
                 'c': {'ports': [{'catalog': 'cat1.xml', 'dataset': 'data1.nc'}, {'catalog': 'cat2.xml', 'dataset': 'data2.nc'}]}
             },
@@ -97,7 +97,9 @@ class ContextTests(unittest.TestCase):
         port_a = context.ports['a']
         self.assertTrue(port_a.was_supplied)
         self.assertEqual(2, len(port_a))
+        self.assertEqual('doc1', port_a[0].document_id)
         self.assertEqual(port_a_document, port_a[0].value)
+        self.assertEqual('doc2', port_a[1].document_id)
         self.assertEqual(port_b_document, port_a[1].value)
 
         for p in port_a:

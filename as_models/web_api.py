@@ -1,7 +1,8 @@
 
 from __future__ import print_function
 
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT
+from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, \
+    INPUT_PORT
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
 from .manifest import Manifest
@@ -32,7 +33,7 @@ class _Updater(object):
         self._modified_streams = set()
         self._modified_documents = {}
 
-    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents=[]):
+    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
         update = { k:v for k,v in {
             'state': RUNNING,
             'message': message,
@@ -41,17 +42,14 @@ class _Updater(object):
 
         self._modified_streams.update(modified_streams)
 
-        for mod_doc in modified_documents:
-            port_name = mod_doc['name']
-            if mod_doc.get('index', None):
+        for port_name, mod_doc in modified_documents.items():
+            if type(mod_doc) != str and 'index' in mod_doc:
                 # must be a collection update...
                 if port_name not in self._modified_documents:
                     self._modified_documents[port_name] = []
                 self._modified_documents[port_name].append(mod_doc)
             else:
-                self._modified_documents.update({ port_name: mod_doc['document'] })
-
-        # self._modified_documents.update(modified_documents)
+                self._modified_documents[port_name] = mod_doc
 
         if update:
             self._state.update(update)
@@ -150,15 +148,44 @@ class _JobProcess(object):
 
             # Update ports (generate "results").
             # TODO: this could probably be neater.
-            mod_docs = updater._modified_documents
+            mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
             results = {}
 
+            bindings = self._job_request['ports']
+
             for port in self._manifest.models[model_id].ports:
-                if port.type == DOCUMENT_PORT and port.name in mod_docs:
-                    results[port.name] = { 'type': port.type, 'document': mod_docs[port.name]}
+                # only write results for output ports...
+                if port.direction == INPUT_PORT:
+                    continue
+
+                try:
+                    binding = bindings[port.name]
+                except KeyError:
+                    continue
+
+                if port.type == STREAM_PORT and binding.get('streamId') in mod_streams:
+                    results[port.name] = {'type': port.type}
+                elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
+                    results[port.name] = {'type': port.type, 'outdatedStreams': list(
+                    mod_streams.intersection(binding.get('streamIds', [])))}
+                elif port.type == DOCUMENT_PORT and port.name in mod_docs:
+                    document_update = mod_docs[port.name]
+                    document_update['type'] = port.type
+
+                    if 'documentId' not in document_update and 'documentId' in binding:
+                        document_update['documentId'] = binding.get('documentId')
+
+                    results[port.name] = document_update
+
                 elif port.type == DOCUMENT_COLLECTION_PORT and port.name in mod_docs:
-                    print(mod_docs[port.name])
-                    results[port.name] = {'type': port.type, 'ports': [{'document': document['document'], 'index': document['index'] } for document in mod_docs[port.name]]}
+                    inner_documents = mod_docs[port.name]
+                    inner_bindings = binding.get('ports')
+
+                    for document_update in inner_documents:
+                        if 'documentId' not in document_update and 'index' in document_update:
+                            document_update['documentId'] = inner_bindings[document_update['index']].get('documentId')
+
+                    results[port.name] = {'type': port.type, 'ports': inner_documents}
 
             self._sender.send({
                 'state': COMPLETE,
@@ -193,16 +220,27 @@ class _WebAPILogHandler(logging.Handler):
 
 app = Flask(__name__)
 
-_process = _receiver = None
-_state = { 'state': PENDING }
-_model_complete = multiprocessing.Value('i', 0)
+_process = _receiver = _state = _model_complete = _root_logger = _logger = None
 
-_root_logger = logging.getLogger()
-_root_logger.addHandler(_WebAPILogHandler(_state))
+def _reset():
 
-_logger = logging.getLogger('WebAPI')
+    global _process, _receiver, _state, _model_complete, _root_logger, _logger
 
-logging.getLogger('werkzeug').setLevel(logging.ERROR) # disable unwanted Flask HTTP request logs
+    _process = _receiver = None
+
+    _state = {'state': PENDING}
+    _model_complete = multiprocessing.Value('i', 0)
+
+    _root_logger = logging.getLogger()
+    _root_logger.addHandler(_WebAPILogHandler(_state))
+
+    _logger = logging.getLogger('WebAPI')
+
+
+_reset()
+
+
+logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
 
 def _load_entrypoint(path):
     path = os.path.abspath(path)
@@ -238,7 +276,7 @@ def _get_state():
     return _state
 
 def _handle_failed_child_process(sender):
-    while True:
+    while _process is not None and _process.is_alive():
         # Attempt to reap an exited child process.
         try:
             pid, exit_code = os.waitpid(-1, os.WNOHANG)
@@ -255,6 +293,7 @@ def _handle_failed_child_process(sender):
         elif pid == 0:
             break
 
+
 @app.route('/', methods=['GET'])
 def _get_root():
     return jsonify(_get_state())
@@ -263,10 +302,13 @@ def _get_root():
 def _post_root():
     global _process, _receiver
 
-    if _process is not None:
+    if _process is not None and _process.is_alive():
         return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
 
+    _reset()
+
     job_request = request.get_json(force=True, silent=True) or {}
+
     try:
         model_id = job_request['modelId']
     except KeyError:
@@ -292,10 +334,11 @@ def _post_root():
     _receiver, sender = multiprocessing.Pipe(False)
 
     #CS: Dsiabling for now to test graincast workflows.
-    #signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
+    # signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
 
     _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
+
 
     return _get_root()
 

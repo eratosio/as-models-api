@@ -69,6 +69,10 @@ class MultistreamPort(PythonPort, BaseMultistreamPort):
 
 class DocumentPort(PythonPort, BaseDocumentPort):
     @property
+    def document_id(self):
+        return self._binding.get('documentId')
+
+    @property
     def value(self):
         return self._binding.get('document')
 
@@ -76,7 +80,13 @@ class DocumentPort(PythonPort, BaseDocumentPort):
     def value(self, value):
         if value != self.value:
             self._binding['document'] = value
-            self._context.update(modified_documents=[{ 'name': self.name, 'document': self.value, 'index': getattr(self, 'index', None) }])
+
+            mod_doc = {'documentId': self.document_id, 'document': self.value}
+
+            if getattr(self, 'index', None) is not None:
+                mod_doc['index'] = self.index
+
+            self._context.update(modified_documents={ self.name: mod_doc })
 
 class GridPort(PythonPort, BaseGridPort):
     @property

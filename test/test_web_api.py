@@ -12,6 +12,11 @@ import os, multiprocessing, sys, unittest
 
 from as_models.web_api import app
 
+# Necessary to import rpy2 globally here - lazy loading dependencies in r_models.run_model on MACOS causes underlying crash
+from rpy2.robjects import r, conversion
+from rpy2.rinterface import NULL
+from rpy2.robjects.vectors import ListVector
+
 def get_model_path(lang='python'):
     if lang == 'python':
         test_model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'test_model')
@@ -32,15 +37,16 @@ def get_model_path(lang='python'):
     }
 
 def host_model(model_path, port):
-    sys.stdout = open('{}.out'.format(port), 'w')
-    sys.stderr = open('{}.err'.format(port), 'w')
+    # sys.stdout = open('{}.out'.format(port), 'w')
+    # sys.stderr = open('{}.err'.format(port), 'w')
     
     app.config['model_path'] = model_path
-    app.run(host='0.0.0.0', port=port)
+
+    return app.test_client()
 
 class TestModelClient(object):
-    def __init__(self, port):
-        self._base_url = 'http://localhost:{}/'.format(port)
+    def __init__(self, port, test_client):
+        self._test_client = test_client
     
     def start(self, payload=None): # TODO: model params
 
@@ -51,45 +57,29 @@ class TestModelClient(object):
                 'output': { 'document': 'placeholder' }
             }
         }
-        
-        return self._request('POST', json=p)
+
+        return self._test_client.post(json=p).json
 
     def poll(self):
-        return self._request('GET')
+        return self._test_client.get().json
     
     def terminate(self, timeout):
-        print('POST terminate')
-        return self._request('POST', path='terminate', json={'timeout': timeout})
-    
-    def _request(self, method, path='', *args, **kwargs):
-        url = self._base_url + path
-        
-        response = requests.request(method, url, *args, **kwargs)
+        return self._test_client.post("terminate", json={'timeout': timeout}).json
 
-        try:
-            response.raise_for_status()
-        except HTTPError as e:
-            raise RuntimeError(e.response.json())
-        
-        return response.json()
 
 class TestModel(object):
     def __init__(self, port, lang='python'):
         self._port = port
         self._proc = None
         self._model_path = get_model_path(lang)['model_path']
-    
-    def __enter__(self):
-        print('starting...')
-        self._proc = multiprocessing.Process(target=host_model, args=(self._model_path, self._port))
-        self._proc.start()
 
-        return TestModelClient(self._port)
+    def __enter__(self):
+        self._test_client = host_model(self._model_path, self._port)
+        self._test_client.__enter__()
+        return TestModelClient(self._port, self._test_client)
     
     def __exit__(self, *args):
-        print('terminating...')
-        self._proc.terminate()
-        self._proc.join(10)
+        self._test_client.__exit__(None, None, None)
 
 class EntrypointTests(unittest.TestCase):
     def test_load_from_directory(self):
@@ -119,86 +109,97 @@ class EntrypointTests(unittest.TestCase):
 
 class HostTests(unittest.TestCase):
     def test_hosting_test_model(self):
+
         for lang in ['r', 'python']:
-            with TestModel(8000, lang) as model:
-                # Send job start request.
-                response = model.start()
-                self.assertEqual('PENDING', response['state'])
+            self.test_model(lang)
 
-                # Poll for model completion.
-                while response['state'] not in ('COMPLETE', 'FAILED'):
-                    response = model.poll()
-                    if 'log' in response:
-                        print(json.dumps(response['log'], indent=4, sort_keys=True))
-                    print(response.get('exception', ''))
+    def test_model(self, lang='python', payload_json=None, expected_completation_state = 'COMPLETE'):
 
-                self.assertEqual('COMPLETE', response['state'])
+        print('--- Executing Test (lang=%s) ---'%lang)
 
-                # Allow up to 10 seconds for the model to terminate.
-                response = model.terminate(10.0)
-                self.assertEqual('Model shut down cleanly.', response['log'][-1]['message'])
+        with TestModel(8000, lang) as model:
+            # Send job start request.
+            response = model.start(payload_json)
+            #
+            # self.assertIn(['PENDING', 'COMPLETE', 'FAILED'], response['state'])
 
-    def test_collection_ports(self):
-        for lang in ['r']:
-            with TestModel(8000, lang) as model:
-                # Send job start request.
-                response = model.start({
+            # Poll for model completion.
+            while response['state'] not in ('COMPLETE', 'FAILED'):
+                response = model.poll()
+
+            # Allow up to 10 seconds for the model to terminate.
+            response = model.terminate(10.0)
+            # self.assertEqual('Model shut down cleanly.', terminate_response.get('log', [])[-1]['message'])
+
+            print(json.dumps(response.get('log', []), indent=4, sort_keys=True))
+            print(response.get('exception', ''))
+
+        return response
+
+    def test_all_port_types_model_r(self):
+            response = self.test_model('r', {
                     "modelId": "all_port_types_model",
                     "ports": {
-                        "input_documents": { "ports": [{ "document": "foo" }, { "document": "bar" }] },
+                        "input_documents": { "ports": [{ "documentId": "indoc1", "document": "foo" }, { "document": "bar" }] },
                         "input_streams": { "ports": [{"streamId": "s1"}, {"streamId": "s2"}]},
-                        "output_documents": {"ports": [{"document": "foo 0"}, {"document": ""}]},
-                        "input_document": {"document": "single input"}
+                        "output_documents": {"ports": [{ "documentId": "outdoc1", "document": "foo foo"}, { "documentId": "outdoc2", "document": "bar bar"}]},
+                        "input_document": {"document": "single input"},
+                        "output_document": {"documentId": "abc", "document": "single output"}
                     }
                 })
 
-                self.assertEqual('PENDING', response['state'])
+            results = response['results']
 
-                # Poll for model completion.
-                while response['state'] not in ('COMPLETE', 'FAILED'):
-                    response = model.poll()
-                    print(json.dumps(response['log'], indent=4, sort_keys=True))
-                    print(response.get('exception', ''))
+            # TODO: test collection updates when supported...
+            output_document = results['output_document']
 
-                self.assertEqual('COMPLETE', response['state'])
+            self.assertNotIn('input_documents', results)
+            self.assertNotIn('input_document', results)
+            self.assertEqual('single input updated', output_document['document'])
 
-                print (response['results'])
+    def test_all_port_types_model_python(self):
+        response = self.test_model('python', {
+            "modelId": "all_port_types_model",
+            "ports": {
+                "input_documents": {"ports": [{"documentId": "indoc1", "document": "foo"}, {"document": "bar"}]},
+                "input_streams": {"ports": [{"streamId": "s1"}, {"streamId": "s2"}]},
+                "output_documents": {"ports": [{"documentId": "outdoc1", "document": "foo foo"},
+                                               {"documentId": "outdoc2", "document": "bar bar"}]},
+                "input_document": {"document": "single input"},
+                "output_document": {"documentId": "abc", "document": "single output"}
+            }
+        })
 
-                # Allow up to 10 seconds for the model to terminate.
-                response = model.terminate(10.0)
-                self.assertEqual('Model shut down cleanly.', response['log'][-1]['message'])
+        results = response['results']
+
+        output_document = results['output_document']
+        output_documents = results['output_documents']['ports']
+
+        print(results)
+        self.assertNotIn('input_documents', results)
+        self.assertNotIn('input_document', results)
+        self.assertEqual('single input updated', output_document['document'])
+        self.assertEqual('foo 0', output_documents[0]['document'])
+        self.assertEqual('bar 1', output_documents[1]['document'])
 
     def test_missing_required_ports_should_warn_not_fail(self):
-        for lang in ['r']:
-            with TestModel(8000, lang) as model:
-                # Send job start request.
-                response = model.start({
-                    'modelId': 'required_ports_model_in1_out1',
-                    'ports': {
-                        'in1': { 'value': 'assigned value ok' }
-                        # out1 is the missing port and should warn but not fail...
-                    }
-                })
 
-                self.assertEqual('PENDING', response['state'])
+        for lang in ['r', 'python']:
 
-                # Poll for model completion.
-                while response['state'] not in ('COMPLETE', 'FAILED'):
-                    response = model.poll()
-                    print(json.dumps(response['log'], indent=4, sort_keys=True))
-                    print(response.get('exception', ''))
+            response = self.test_model(lang, {
+                'modelId': 'required_ports_model_in1_out1',
+                'ports': {
+                    'in1': { 'value': 'assigned value ok' }
+                    # out1 is the missing port and should warn but not fail...
+                }
+            }, 'COMPLETE')
 
-                self.assertEqual('COMPLETE', response['state'])
+            first_log_message = response['log'][0]['message']
 
-                # Allow up to 10 seconds for the model to terminate.
-                response = model.terminate(10.0)
+            for term in ['Missing', 'required', 'port', 'out1']:
+                self.assertIn(term, first_log_message)
 
-                first_log_message = response['log'][0]['message']
+            for term in ['in1']: # in1 is fine, shouldn't be reported on...
+                self.assertNotIn(term, first_log_message)
 
-                for term in ['Missing', 'required', 'port', 'out1']:
-                    self.assertIn(term, first_log_message)
-
-                for term in ['in1']: # in1 is fine, shouldn't be reported on...
-                    self.assertNotIn(term, first_log_message)
-
-                self.assertEqual('WARNING', response['log'][0]['level'])
+            self.assertEqual('WARNING', response['log'][0]['level'])

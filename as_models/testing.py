@@ -89,7 +89,7 @@ class DocumentPort(BaseDocumentPort):
     def value(self, value):
         if value != self._value:
             self._value = value
-            self._context.update(modified_documents={ self.name: self.value })
+            self._context.update(modified_document={self.name: self.value})
 
     @property
     def was_supplied(self):
