@@ -1,5 +1,6 @@
 
-from .context import BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
+from .context import BaseContext
+from .python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context
 from .util import resolve_service_config
 from . import ports
 from .manifest import Port
@@ -43,77 +44,8 @@ class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazil
 
         self._context.update(modified_streams=[streamid])
 
-class StreamPort(BaseStreamPort):
-    def __init__(self, context, name, type, direction, stream_id):
-        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
-        super(StreamPort, self).__init__(context, port)
-
-        self._stream_id = stream_id
-
-    @property
-    def stream_id(self):
-        return self._stream_id
-
-    @property
-    def was_supplied(self):
-        return self._stream_id is not None
-
-class MultistreamPort(BaseMultistreamPort):
-    def __init__(self, context, name, type, direction, stream_ids):
-        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
-        super(MultistreamPort, self).__init__(context, port)
-
-        self._stream_ids = stream_ids
-
-    @property
-    def stream_ids(self):
-        return self._stream_ids
-
-    @property
-    def was_supplied(self):
-        return self._stream_ids is not None
-
-class DocumentPort(BaseDocumentPort):
-    def __init__(self, context, name, type, direction, value):
-        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
-        super(DocumentPort, self).__init__(context, port)
-
-        self._value = value
-        self._supplied = value is not None
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, value):
-        if value != self._value:
-            self._value = value
-            self._context.update(modified_document={self.name: self.value})
-
-    @property
-    def was_supplied(self):
-        return self._supplied
-
-class GridPort(BaseGridPort):
-    def __init__(self, context, name, type, direction, catalog_url, dataset_path):
-        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
-        super(GridPort, self).__init__(context, port)
-
-        self._catalog_url = catalog_url
-        self._dataset_path = dataset_path
-
-    @property
-    def catalog_url(self):
-        return self._catalog_url
-
-    @property
-    def dataset_path(self):
-        return self._dataset_path
-
-    @property
-    def was_supplied(self):
-        return self._dataset_path is not None
+def _generate_binding(required_val, **kwargs):
+    return None if required_val is None else kwargs
 
 class Context(BaseContext):
     def __init__(self, model_id=None):
@@ -128,14 +60,16 @@ class Context(BaseContext):
         self._sensor_client = self._analysis_client = self._thredds_client = self._thredds_upload_client = None
 
     def configure_port(self, name, type, direction, stream_id=None, stream_ids=None, value=None, catalog_url=None, dataset_path=None):
+        port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
+
         if type == ports.STREAM_PORT:
-            self.ports._add(StreamPort(self, name, type, direction, stream_id))
+            self.ports._add(StreamPort(self, port, _generate_binding(stream_id, streamId=stream_id)))
         elif type == ports.MULTISTREAM_PORT:
-            self.ports._add(MultistreamPort(self, name, type, direction, stream_ids))
+            self.ports._add(MultistreamPort(self, port, _generate_binding(stream_ids, streamIds=stream_ids)))
         elif type == ports.DOCUMENT_PORT:
-            self.ports._add(DocumentPort(self, name, type, direction, value))
+            self.ports._add(DocumentPort(self, port, _generate_binding(value, document=value)))
         elif type == ports.GRID_PORT:
-            self.ports._add(GridPort(self, name, type, direction, catalog_url, dataset_path))
+            self.ports._add(GridPort(self, port, _generate_binding(dataset_path, catalog=catalog_url, dataset=dataset_path)))
         else:
             raise ValueError('Unsupported port type "{}"'.format(type))
 
