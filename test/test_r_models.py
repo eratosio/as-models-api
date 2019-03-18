@@ -83,24 +83,24 @@ class ContextTests(unittest.TestCase):
 
         # print (doc1)
         self.assertEqual('\"doc1\"', doc1.rx2('document').r_repr())
-        self.assertEqual(0L, long(doc1.rx2('index').r_repr()))
+        self.assertEqual(0, long(doc1.rx2('index').r_repr()))
         self.assertEqual('\"doc2\"', str(doc2.rx2('document').r_repr()))
-        self.assertEqual(1L, long(doc2.rx2('index').r_repr()))
+        self.assertEqual(1, long(doc2.rx2('index').r_repr()))
 
         stream1 = ports.rx2('b')[0]
         stream2 = ports.rx2('b')[1]
 
         self.assertEqual('\"stream1\"', stream1.rx2('streamId').r_repr())
-        self.assertEqual(0L, long(stream1.rx2('index').r_repr()))
+        self.assertEqual(0, long(stream1.rx2('index').r_repr()))
         self.assertEqual('\"stream2\"', str(stream2.rx2('streamId').r_repr()))
-        self.assertEqual(1L, long(stream2.rx2('index').r_repr()))
+        self.assertEqual(1, long(stream2.rx2('index').r_repr()))
 
         grid1 = ports.rx2('c')[0]
         grid2 = ports.rx2('c')[1]
 
         self.assertEqual('\"cat1.xml\"', grid1.rx2('catalog').r_repr())
         self.assertEqual('\"data1.nc\"', grid1.rx2('dataset').r_repr())
-        self.assertEqual(0L, long(grid1.rx2('index').r_repr()))
+        self.assertEqual(0, long(grid1.rx2('index').r_repr()))
         self.assertEqual('\"cat2.xml\"', grid2.rx2('catalog').r_repr())
         self.assertEqual('\"data2.nc\"', grid2.rx2('dataset').r_repr())
-        self.assertEqual(1L, long(grid2.rx2('index').r_repr()))
+        self.assertEqual(1, long(grid2.rx2('index').r_repr()))
