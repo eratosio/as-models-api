@@ -5,9 +5,12 @@ from . import models
 from .util import resolve_service_config
 
 from senaps_sensor.api import API
-from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
-import importlib, os, requests, sys
+from tds_client.catalog import Catalog
+from tds_client.catalog.search import QuickSearchStrategy
+from tds_client.util import urls
+
+import importlib, os, sys
 
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
@@ -44,6 +47,9 @@ def session_for_auth(auth, verify=None):
     session.auth = auth
 
     return session
+
+def urlpath(url):
+    return urls.urlparse(url).path
 
 class PythonPort(BasePort):
     def __init__(self, context, port, binding):
@@ -94,6 +100,26 @@ class _SCApiProxy(API):
 
     def create_observations(self, results, streamid):
         super(_SCApiProxy, self).create_observations(results, streamid=streamid)
+
+
+class SenapsSearchStrategy(QuickSearchStrategy):
+    def get_next_candidates(self, catalog, dataset_url):
+        catalogs = super(SenapsSearchStrategy, self).get_next_candidates(catalog, dataset_url)
+
+        # Check if one of the catalogs is the Senaps master org catalog.
+        org_catalog = next((cat for cat in catalogs if 'org-catalogs.xml' == urls.path.basename(urlpath(cat.url))), None)
+        if org_catalog:
+            # Move the org catalog to the end of the list.
+            catalogs.remove(org_catalog)
+            catalogs.append(org_catalog)
+
+            # Assume the dataset in question is an org dataset, and add its expected catalog to the list.
+            orgs_base = urls.path.join(urls.path.dirname(urlpath(org_catalog.url)), 'org_catalogs')
+            catalog_path = urls.path.join(urls.path.dirname(dataset_url), 'catalog.xml')
+            catalog_url = urls.override(org_catalog.url, path=urls.path.join(orgs_base, catalog_path))
+            catalogs.insert(0, Catalog(catalog_url, org_catalog.client))
+
+        return catalogs
 
 class Context(BaseContext):
     _port_type_map = {
@@ -157,7 +183,7 @@ class Context(BaseContext):
 
             url, _, _, auth, verify = resolve_service_config(**self._thredds_config)
 
-            self._thredds_client = Client(url, session_for_auth(auth, verify))
+            self._thredds_client = Client(url, session_for_auth(auth, verify), strategy=SenapsSearchStrategy)
 
         return self._thredds_client
 
