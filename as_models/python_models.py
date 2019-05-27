@@ -113,9 +113,12 @@ class SenapsSearchStrategy(QuickSearchStrategy):
             catalogs.remove(org_catalog)
             catalogs.append(org_catalog)
 
+            # Remove leading separators from the dataset path (it should always be treated as a relative path).
+            dataset_path = dataset_url.lstrip(urls.path.sep)
+
             # Assume the dataset in question is an org dataset, and add its expected catalog to the list.
             orgs_base = urls.path.join(urls.path.dirname(urlpath(org_catalog.url)), 'org_catalogs')
-            catalog_path = urls.path.join(urls.path.dirname(dataset_url), 'catalog.xml')
+            catalog_path = urls.path.join(urls.path.dirname(dataset_path), 'catalog.xml')
             catalog_url = urls.override(org_catalog.url, path=urls.path.join(orgs_base, catalog_path))
             catalogs.insert(0, Catalog(catalog_url, org_catalog.client))
 
