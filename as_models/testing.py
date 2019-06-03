@@ -137,7 +137,7 @@ class Context(BaseContext):
             from as_client import Client
 
             url, _, _, auth, verify = self._analysis_config
-            self._analysis_client = Client(url, auth)
+            self._analysis_client = Client(url, auth=auth)
 
         return self._analysis_client
 
