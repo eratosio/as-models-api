@@ -193,7 +193,7 @@ class _JobProcess(object):
                 'results': results
             })
         except BaseException as e:
-            logger.critical('Model failed with exception: %s', e.message)
+            logger.critical('Model failed with exception: %s', e)
 
             self._sender.send({
                 'state': FAILED,

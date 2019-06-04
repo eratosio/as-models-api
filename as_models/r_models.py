@@ -83,7 +83,7 @@ def _convert_ports(model, port_bindings):
             for idx, port in enumerate(inner_ports):
                 port['index'] = idx
 
-            result[str(port_name)] = map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports)
+            result[str(port_name)] = list(map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports))
         else:
             result[str(port_name)] = ListVector(dict(
                 name=port_name,

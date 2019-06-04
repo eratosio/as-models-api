@@ -20,7 +20,7 @@ def summarise(port, type):
             'grid_collection': lambda ports: [actions['grid'](x) for x in ports],
          }
 
-        print '%s: %s' % (port.name, actions[type](port))
+        print('%s: %s' % (port.name, actions[type](port)))
 
 
 
