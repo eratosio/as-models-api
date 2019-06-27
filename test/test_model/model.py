@@ -1,11 +1,22 @@
+# -*- coding: UTF-8 -*-
+
+import datetime
+from as_models.exceptions import SenapsModelError
+
 
 def noop(context):
     pass
 
+
 def required_ports_model_in1_out1(context):
     pass
 
+
 def test_model(context):
+    raise SenapsModelError('BOOM', user_data={
+        'senap_model_err_name': 'an_error',
+        'err_datetime': datetime.datetime.now()})
+    # pass some user data using our new exception class. Also a field that is illegal.
     pass
 
 
@@ -18,10 +29,9 @@ def summarise(port, type):
             'stream_collection': lambda ports: [actions['stream'](x) for x in ports],
             'grid': lambda port: (port.catalog_url, port.dataset_path) if port.catalog_url else '',
             'grid_collection': lambda ports: [actions['grid'](x) for x in ports],
-         }
+        }
 
         print('%s: %s' % (port.name, actions[type](port)))
-
 
 
 def all_port_types_model(context):

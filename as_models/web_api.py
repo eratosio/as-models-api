@@ -6,6 +6,8 @@ from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTI
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
 from .manifest import Manifest
+from .exceptions import SenapsModelError
+from .util import sanitize_dict_for_json
 from . import log_levels, python_models, r_models
 
 import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
@@ -118,6 +120,29 @@ class _JobProcess(object):
         self._sender = sender
         self._logger = logger
 
+    def __post_exception(self, exc):
+        """
+        Given an exception object, use the _sender to post a dict of results.
+
+        :param exc: Exception or subclass thereof
+        :return: None
+        """
+        # get formatted traceback.
+        tb = sys.exc_info()[-1]
+        developer_msg = ''
+        if tb is not None:
+            # it should only be able to be None if another exception is raised on this thread
+            # or someone invoked exc_clear prior to use consuming it.
+            developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
+        user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else ''
+        self._sender.send({
+            'state': FAILED,
+            'exception': {  # TODO: CPS-889: this format not supported by AS-API yet.
+                'developer_msg': developer_msg,
+                'data': user_data if user_data is not None else ''
+            }
+        })
+
     def __call__(self):
         signal.signal(signal.SIGTERM, _signalterm_handler)
 
@@ -144,7 +169,7 @@ class _JobProcess(object):
             else:
                 raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
             _model_complete.value = 1
-            logger.debug('Implementation method for model %s returned.', model_id)
+            logger.debug('Implementation method for model %s r eturned.', model_id)
 
             # Update ports (generate "results").
             # TODO: this could probably be neater.
@@ -195,10 +220,8 @@ class _JobProcess(object):
         except BaseException as e:
             logger.critical('Model failed with exception: %s', e)
 
-            self._sender.send({
-                'state': FAILED,
-                'exception': traceback.format_exc()
-            })
+            self.__post_exception(e)
+
 
 class _WebAPILogHandler(logging.Handler):
     def __init__(self, state):
@@ -324,7 +347,7 @@ def _post_root():
     missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
 
     if missing_ports:
-        _logger.warn('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
+        _logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
 
     args = app.config.get('args', {})
     runtime_type = _determine_runtime_type(entrypoint, args)

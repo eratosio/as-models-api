@@ -62,7 +62,7 @@ class TestModelClient(object):
 
     def poll(self):
         return self._test_client.get().json
-    
+
     def terminate(self, timeout):
         return self._test_client.post("terminate", json={'timeout': timeout}).json
 
@@ -203,3 +203,7 @@ class HostTests(unittest.TestCase):
                 self.assertNotIn(term, first_log_message)
 
             self.assertEqual('WARNING', response['log'][0]['level'])
+
+
+if __name__ == "__main__":
+    unittest.main()
