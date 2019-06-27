@@ -49,12 +49,12 @@ class ContextTests(unittest.TestCase):
         model = Model({
             'id': 'test',
             'ports': [
-                {'portName': 'a', 'type': DOCUMENT_PORT, 'direction': INPUT_PORT, 'required': False},
-                {'portName': 'b', 'type': DOCUMENT_PORT, 'direction': INPUT_PORT, 'required': False},
-                {'portName': 'c', 'type': STREAM_PORT, 'direction': INPUT_PORT, 'required': False},
-                {'portName': 'd', 'type': STREAM_PORT, 'direction': INPUT_PORT, 'required': False},
-                {'portName': 'e', 'type': GRID_PORT, 'direction': INPUT_PORT, 'required': False},
-                {'portName': 'f', 'type': GRID_PORT, 'direction': INPUT_PORT, 'required': False}
+                {'portName': 'a', 'type': DOCUMENT_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'b', 'type': DOCUMENT_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'c', 'type': STREAM_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'd', 'type': STREAM_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'e', 'type': GRID_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False},
+                {'portName': 'f', 'type': GRID_COLLECTION_PORT, 'direction': INPUT_PORT, 'required': False}
             ]
         })
         job_request = {

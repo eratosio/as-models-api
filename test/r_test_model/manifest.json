@@ -1,5 +1,5 @@
 {
-    "baseImage": "6737f90e-a795-4e5b-923c-1513d2914720",
+    "baseImage": "da9b54b0-5467-4a9f-b59a-58525885ddc5",
     "organisationId": "test_org",
     "groupIds": [ "test_group" ],
     "entrypoint": "model.R",
