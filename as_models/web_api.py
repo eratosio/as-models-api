@@ -120,11 +120,12 @@ class _JobProcess(object):
         self._sender = sender
         self._logger = logger
 
-    def __post_exception(self, exc):
+    def __post_exception(self, exc, model_id):
         """
         Given an exception object, use the _sender to post a dict of results.
 
         :param exc: Exception or subclass thereof
+        :param model_id: str: model id that raised this exception. May be None.
         :return: None
         """
         # get formatted traceback.
@@ -134,16 +135,18 @@ class _JobProcess(object):
             # it should only be able to be None if another exception is raised on this thread
             # or someone invoked exc_clear prior to use consuming it.
             developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
-        user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else ''
+        user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         self._sender.send({
             'state': FAILED,
             'exception': {  # TODO: CPS-889: this format not supported by AS-API yet.
                 'developer_msg': developer_msg,
-                'data': user_data if user_data is not None else ''
+                'data': user_data,
+                'model_id': model_id
             }
         })
 
     def __call__(self):
+        model_id = None     # pre-declare this so the name exists later if an exception occurs.
         signal.signal(signal.SIGTERM, _signalterm_handler)
 
         updater = _Updater(self._sender)
@@ -220,7 +223,7 @@ class _JobProcess(object):
         except BaseException as e:
             logger.critical('Model failed with exception: %s', e)
 
-            self.__post_exception(e)
+            self.__post_exception(e, model_id)
 
 
 class _WebAPILogHandler(logging.Handler):

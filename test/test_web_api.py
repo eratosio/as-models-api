@@ -132,7 +132,14 @@ class HostTests(unittest.TestCase):
             # self.assertEqual('Model shut down cleanly.', terminate_response.get('log', [])[-1]['message'])
 
             print(json.dumps(response.get('log', []), indent=4, sort_keys=True))
-            print(response.get('exception', ''))
+            exception_details = response.get('exception', '')
+            print(exception_details)
+
+            # we'd like to know the fields in exception are set correctly.
+            if len(exception_details) > 0:
+                self.assertTrue('developer_msg' in exception_details)
+                self.assertTrue('data' in exception_details)
+                self.assertTrue('model_id' in exception_details)
 
         return response
 
