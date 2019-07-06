@@ -2,6 +2,8 @@
 import datetime
 import unittest
 
+from six import string_types
+
 from as_models.util import sanitize_dict_for_json
 
 
@@ -52,4 +54,5 @@ class TestJsonUtils(unittest.TestCase):
                    'current_date': dt_now.date()}
         sanitized = sanitize_dict_for_json(invalid)
         # all values should now be strings, no datetimes.
-        self.assertTrue(all([type(x) == str for x in sanitized.values()]))
+        # using six string_types here for 2/3 compatibility
+        self.assertTrue(all([isinstance(x, string_types) for x in sanitized.values()]), [type(x) for x in sanitized.values()])

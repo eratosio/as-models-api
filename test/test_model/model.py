@@ -57,3 +57,7 @@ def all_port_types_model(context):
         context.ports['output_documents'][idx].value = new_value
 
     context.ports['output_document'].value = context.ports['input_document'].value + ' updated'
+
+
+def test_error(context):
+    raise SenapsModelError("something went wrong", {"foo": "bar"})

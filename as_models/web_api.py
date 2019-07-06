@@ -139,7 +139,7 @@ class _JobProcess(object):
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         self._sender.send({
             'state': FAILED,
-            'exception': {  # TODO: CPS-889: this format not supported by AS-API yet.
+            'exception': {  # CPS-889: this format only supported since AS-API v3.9.3
                 'developer_msg': developer_msg,
                 'data': user_data,
                 'model_id': model_id
@@ -173,7 +173,7 @@ class _JobProcess(object):
             else:
                 raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
             _model_complete.value = 1
-            logger.debug('Implementation method for model %s r eturned.', model_id)
+            logger.debug('Implementation method for model %s returned.', model_id)
 
             # Update ports (generate "results").
             # TODO: this could probably be neater.

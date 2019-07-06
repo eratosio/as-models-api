@@ -1,30 +1,42 @@
 all_port_types_model <- function(context) {
-    cat('Running all_port_types_model')
+    print('Running all_port_types_model')
 
     input_documents = context$ports$input_documents
     output_documents = context$ports$output_documents
 
-    #for (input in input_documents) {
-    #   output_documents[[input$index + 1]]$document = paste(input$document, input$index, sep=' ')
-    #}
+    for (i in input_documents) {
+        print(i)
+    }
+
+    for (o in output_documents) {
+        print(o)
+    }
+
+    # TODO: currently writing back to document collection ports in R is not complete.
+    # TODO: for collection ports it might be easier to implement something like:?
+    # context$update(context)
+    # for (input in input_documents) {
+    #     output_documents[[input$index + 1]]$document = paste(input$document, input$index, sep=' ')
+    # }
 
     context$update(modified_documents=list(output_document=paste0(context$ports$input_document$document,' updated')))
 
-    # for collection ports might be easier to implement something like:?
-     #context$update(context)
-
-    cat('Done all_port_types_model')
+    print('Done all_port_types_model')
 
 }
 
 test_model <- function(context) {
-    cat('Running test_model')
-    cat('Done test_model')
+    print('Running test_model')
+    print('Done test_model')
 
 }
 
 required_ports_model_in1_out1 <- function(context) {
-    cat('Running required_ports_model_in1_out1')
-    cat('Done required_ports_model_in1_out1')
+    print('Running required_ports_model_in1_out1')
+    print('Done required_ports_model_in1_out1')
 
+}
+
+test_error <- function(context) {
+    stop("something went wrong")
 }

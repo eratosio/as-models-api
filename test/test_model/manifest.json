@@ -161,6 +161,14 @@
                     "direction": "output"
                 }
             ]
+        },
+        {
+            "id": "test_error",
+            "name": "Tests failing immediately",
+            "version": "0.0.1",
+            "description": "",
+            "method": "",
+            "ports": []
         }
     ]
 }

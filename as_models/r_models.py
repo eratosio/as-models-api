@@ -39,7 +39,8 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         raise RuntimeError('Member "{}" of model "{}" is not a callable function.'.format(model_id, entrypoint)) # TODO: more specific exception type?
 
     # Enable custom conversions.
-    @conversion.py2rpy.register(type(None))
+    # Requires rpy2==2.8.6 (r_requirements.txt)
+    @conversion.py2ri.register(type(None))
     def convert_none(none):
         return NULL
 
