@@ -7,6 +7,7 @@ from .sentinel import Sentinel
 from .manifest import Manifest
 from . import log_levels, python_models, r_models
 
+import copy
 import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
 from flask import Flask, jsonify, make_response, request
 
@@ -215,6 +216,7 @@ def _load_entrypoint(path):
 
     return manifest, os.path.join(os.path.dirname(manifest_path), manifest.entrypoint)
 
+
 def _get_state():
     if (None not in (_process, _receiver)) and (_state.get('state', None) in (None, PENDING, RUNNING)):
         try:
@@ -225,7 +227,17 @@ def _get_state():
         except EOFError as e:
             print(e) # TODO: handle better
 
-    return _state
+    ret_val = copy.deepcopy(_state)
+    # CPS-952: purge old log messages.
+    if 'log' in _state:
+        purge_count = len(_state['log'])
+        for i in range(purge_count, 0, -1):
+            # count backwards always deleting the 0th item.
+            # allows us to avoid clobbering incoming messages while we work.
+            del _state['log'][0]
+
+    return ret_val
+
 
 def _handle_failed_child_process(sender):
     while True:
@@ -312,6 +324,6 @@ def _post_terminate():
     if callable(func):
         func()
     else:
-        _logger.warning('Unable to terminate model API (shutdown hook unavailable).');
+        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
 
     return _get_root()
