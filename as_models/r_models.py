@@ -48,7 +48,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
     r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
     r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration', None))
-    r_ports = _convert_ports(model, job_request.get('ports', {}))
+    r_ports = _convert_ports(model.ports, job_request.get('ports', {}))
     r_update = _convert_update(updater.update, model, job_request.get('ports', {}))
     r_logger = _convert_logger(updater.log)
 
@@ -69,13 +69,19 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     updater.update() # Marks the job as running.
     implementation(ListVector(context))
 
-def _convert_ports(model, port_bindings):
+def _convert_ports(model_ports, port_bindings):
     from rpy2.robjects.vectors import ListVector
 
     result = {}
-    for port in model.ports:
+    for port in model_ports:
         port_name = port.name
         port_config = port_bindings.get(port_name, {})
+
+        # AS-API sends model requests that also include the 'direction' property.
+        # as_models now uses the port direction from the manifest file.
+        # Make sure this property is removed here to avoid conflict.
+        if 'direction' in port_config:
+            port_config.pop('direction')
 
         if 'ports' in port_config:
             inner_ports = port_config['ports']

@@ -19,11 +19,15 @@ class ContextTests(unittest.TestCase):
                 {'portName': 'f', 'type': GRID_PORT, 'direction': INPUT_PORT, 'required': False}
             ]
         })
+
         job_request = {
             'modelId': 'test',
             'ports': {
-                'b': {'document': 'doc1'},
-                'd': {'streamId': 'stream1'},
+                # AS-API sends model requests that also include the 'direction' property.
+                # as_models now uses the port direction from the manifest file
+                # Make sure this is still supported for backward compatibility.
+                'b': {'document': 'doc1', 'direction': 'input'},
+                'd': {'streamId': 'stream1', 'direction': 'output'},
                 'f': {'catalog': 'cat1.xml', 'dataset': 'data1.nc'}
             },
             'sensorCloudConfiguration': {
@@ -32,7 +36,7 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(model, job_request.get('ports', {}))
+        ports = _convert_ports(model.ports, job_request.get('ports', {}))
 
         doc1 = ports.rx2('b')
         stream1 = ports.rx2('d')
@@ -60,7 +64,10 @@ class ContextTests(unittest.TestCase):
         job_request = {
             'modelId': 'test',
             'ports': {
-                'a': {'ports': [{'document': 'doc1'}, {'document': 'doc2'}]},
+                # AS-API sends model requests that also include the 'direction' property.
+                # as_models now uses the port direction from the manifest file
+                # Make sure this is still supported for backward compatibility.
+                'a': {'ports': [{'document': 'doc1', 'direction': 'input'}, {'document': 'doc2', 'direction': 'input'}]},
                 'b': {'ports': [{'streamId': 'stream1'}, {'streamId': 'stream2'}]},
                 'c': {'ports': [{'catalog': 'cat1.xml', 'dataset': 'data1.nc'}, {'catalog': 'cat2.xml', 'dataset': 'data2.nc'}]}
             },
@@ -70,7 +77,7 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(model, job_request.get('ports', {}))
+        ports = _convert_ports(model.ports, job_request.get('ports', {}))
 
         doc1 = ports.rx2('a')[0]
         doc2 = ports.rx2('a')[1]

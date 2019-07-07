@@ -25,8 +25,11 @@ class ContextTests(unittest.TestCase):
         job_request = {
             'modelId': 'test',
             'ports': {
-                'b': {'document': port_b_document},
-                'd': {'streamId': 'stream1'},
+                # AS-API sends model requests that also include the 'direction' property.
+                # as_models now uses the port direction from the manifest file
+                # Make sure this is still supported for backward compatibility.
+                'b': {'document': port_b_document, 'direction': 'input'},
+                'd': {'streamId': 'stream1', 'direction': 'output'},
                 'f': {'catalog': 'https://senaps.io/catalog.xml', 'dataset': 'dataset.nc'}
             },
             'sensorCloudConfiguration': {
@@ -82,8 +85,11 @@ class ContextTests(unittest.TestCase):
         job_request = {
             'modelId': 'test',
             'ports': {
-                'a': {'ports': [{'documentId': 'doc1', 'document': port_a_document}, {'documentId': 'doc2', 'document': port_b_document}]},
-                'b': {'ports': [{'streamId': 'stream1'}, {'streamId': 'stream2'}]},
+                # AS-API sends model requests that also include the 'direction' property.
+                # as_models now uses the port direction from the manifest file
+                # Make sure this is still supported for backward compatibility.
+                'a': {'ports': [{'documentId': 'doc1', 'document': port_a_document, 'direction': 'input'}, {'documentId': 'doc2', 'document': port_b_document}]},
+                'b': {'ports': [{'streamId': 'stream1', 'direction': 'output'}, {'streamId': 'stream2'}]},
                 'c': {'ports': [{'catalog': 'cat1.xml', 'dataset': 'data1.nc'}, {'catalog': 'cat2.xml', 'dataset': 'data2.nc'}]}
             },
             'sensorCloudConfiguration': {
