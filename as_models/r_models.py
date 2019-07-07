@@ -89,13 +89,13 @@ def _convert_ports(model_ports, port_bindings):
             # to preserve order when returning results, inject the collection index
             for idx, port in enumerate(inner_ports):
                 port['index'] = idx
+                if 'direction' in port:
+                    print('dropping direction...')
+                    port.pop('direction')
 
             result[str(port_name)] = list(map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports))
         else:
-            result[str(port_name)] = ListVector(dict(
-                name=port_name,
-                direction=port.direction,
-                **{ str(k):v for k,v in port_config.items()}))
+            result[str(port_name)] = ListVector(dict(**{ str(k):v for k,v in port_config.items()}))
 
     return ListVector(result)
 
