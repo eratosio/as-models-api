@@ -139,11 +139,13 @@ class HostTests(unittest.TestCase):
             # self.assertEqual('Model shut down cleanly.', terminate_response.get('log', [])[-1]['message'])
 
             exception_details = response.get('exception', '')
+
             print(exception_details)
 
             # we'd like to know the fields in exception are set correctly.
             if len(exception_details) > 0:
                 self.assertTrue('developer_msg' in exception_details)
+                self.assertTrue('msg' in exception_details)
                 self.assertTrue('data' in exception_details)
                 self.assertTrue('model_id' in exception_details)
 
@@ -252,7 +254,7 @@ class HostTests(unittest.TestCase):
             self._all_logs = []
 
             def callback(res):
-                # combine logs
+                # HACK: combine logs. interpreter will find the right variable here.
                 self._all_logs = self._all_logs + res.get('log', [])
 
             response = self.run_model(lang, {
@@ -260,8 +262,36 @@ class HostTests(unittest.TestCase):
                 'ports': {}
             }, callback)
 
-            self.assertIsNotNone(response.get('exception', None))
-            self.assertTrue('something went wrong' in response['exception']['developer_msg'])
+            exception = response.get('exception')
+            self.assertIsNotNone(exception)
+
+            self.assertTrue('something went wrong' in exception['msg'])
+            self.assertTrue('Traceback' in exception['developer_msg'])
+            self.assertTrue('something went wrong' in exception['developer_msg'])
+            self.assertTrue(self._all_logs[0]['level'] in ['CRITICAL', 'STDERR'],
+                            "expecting log error level of 'CRITICAL' or 'STDERR'")
+
+    def test_large_json_string_is_reported(self):
+        for lang in ['python']:
+            # NB: no test for R, we do not support exposing the user_data via R yet.
+            self._all_logs = []
+
+            def callback(res):
+                # HACK: combine logs. interpreter will find the right variable here.
+                self._all_logs = self._all_logs + res.get('log', [])
+
+            response = self.run_model(lang, {
+                'modelId': 'test_error_too_large',
+                'ports': {}
+            }, callback)
+
+            exception = response.get('exception')
+
+            self.assertIsNotNone(exception)
+
+            self.assertTrue('something went wrong' in exception['msg'])
+            self.assertTrue('Traceback' in exception['developer_msg'])
+            self.assertTrue('something went wrong' in exception['developer_msg'])
             self.assertTrue(self._all_logs[0]['level'] in ['CRITICAL', 'STDERR'],
                             "expecting log error level of 'CRITICAL' or 'STDERR'")
 

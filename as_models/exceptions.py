@@ -20,5 +20,10 @@ class SenapsModelError(SenapsError):
         self.user_data = user_data
 
     def __str__(self):
+        """
+        Get a human readable version of the error. Note: will NOT report the user_data field,
+        since it could be very large and we do not accept that in tracebacks.
+        :return: str
+        """
         return '{0}\nuser_data:{1}\n'.format(self.msg,
-                                             str(self.user_data))
+                                             str(self.user_data) if self.user_data is None else '<embedded>')

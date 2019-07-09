@@ -3,6 +3,7 @@ import datetime
 import json
 import sys
 
+from .constants import MAX_ERR_DATA_LEN
 from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
 try:
@@ -71,5 +72,8 @@ def sanitize_dict_for_json(mapping):
     :param mapping: dict: a dict of str: object mappings.
     :return: dict, potentially changed.
     """
-
-    return json.loads(json.dumps(mapping, default=dump_to_json, skipkeys=True))
+    json_data = json.dumps(mapping, default=dump_to_json, skipkeys=True)
+    if len(json_data) > MAX_ERR_DATA_LEN:
+        return {'error': 'json_serialisation_failed, user data larger than max of %s characters. Data preview: %s' % \
+               (MAX_ERR_DATA_LEN, json_data[0:150])}
+    return json.loads(json_data)

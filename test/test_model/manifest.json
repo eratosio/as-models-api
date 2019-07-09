@@ -169,6 +169,14 @@
             "description": "",
             "method": "",
             "ports": []
+        },
+        {
+            "id": "test_error_too_large",
+            "name": "Test large json is truncated",
+            "version": "0.0.1",
+            "description": "",
+            "method": "",
+            "ports": []
         }
     ]
 }

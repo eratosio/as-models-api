@@ -61,3 +61,7 @@ def all_port_types_model(context):
 
 def test_error(context):
     raise SenapsModelError("something went wrong", {"foo": "bar"})
+
+def test_error_too_large(context):
+    # dicts that serialise down to a json string > 1024 characters will not be shipped.
+    raise SenapsModelError("something went wrong", {'foo': 'a' * 1025})
