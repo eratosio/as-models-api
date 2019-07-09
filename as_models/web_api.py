@@ -137,10 +137,12 @@ class _JobProcess(object):
             # or someone invoked exc_clear prior to use consuming it.
             developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
+        msg = exc.msg if type(exc) == SenapsModelError else str(exc)
         self._sender.send({
             'state': FAILED,
             'exception': {  # CPS-889: this format only supported since AS-API v3.9.3
                 'developer_msg': developer_msg,
+                'msg': msg,
                 'data': user_data,
                 'model_id': model_id
             }
