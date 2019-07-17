@@ -1,8 +1,8 @@
 
-from .context import BasePort, BaseStreamPort, BaseMultistreamPort, BaseDocumentPort, BaseGridPort, BaseContext
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
+from .context import BaseContext
+from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT
 from . import models
-from .util import resolve_service_config
+from .util import resolve_service_config, urlparse
 
 from senaps_sensor.api import API
 
@@ -26,7 +26,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     module_name, module_ext = os.path.splitext(model_file)
     sys.path.append(model_dir)
     module = importlib.import_module(module_name)
-    
+
     # Locate a callable matching the model ID.
     try:
         implementation = models._models[model_id]
@@ -51,10 +51,10 @@ def session_for_auth(auth, verify=None):
 def urlpath(url):
     return urls.urlparse(url).path
 
-class PythonPort(BasePort):
+class PythonPort(object):
     def __init__(self, context, port, binding):
-        super(PythonPort, self).__init__(context, port)
-
+        self.__context = context
+        self.__port = port
         self._was_supplied = binding is not None
         self._binding = binding or {}
 
@@ -62,17 +62,46 @@ class PythonPort(BasePort):
     def was_supplied(self):
         return self._was_supplied
 
-class StreamPort(PythonPort, BaseStreamPort):
+    @property
+    def type(self):
+        return self.__port.type
+
+    @property
+    def name(self):
+        return self.__port.name
+
+    @property
+    def direction(self):
+        return self.__port.direction
+
+    @property
+    def _context(self):
+        return self.__context
+
+class StreamPort(PythonPort):
+    def get(self, default=None):
+        return self.stream_id if self.was_supplied else default
+
     @property
     def stream_id(self):
         return self._binding.get('streamId')
 
-class MultistreamPort(PythonPort, BaseMultistreamPort):
+class MultistreamPort(PythonPort):
+    def get(self, default=None):
+        return self.stream_ids if self.was_supplied else default
+
     @property
     def stream_ids(self):
         return self._binding.get('streamIds')
 
-class DocumentPort(PythonPort, BaseDocumentPort):
+class DocumentPort(PythonPort):
+    def get(self, default=None):
+        return self.value if self.was_supplied else default
+
+    @property
+    def document_id(self):
+        return self._binding.get('documentId')
+
     @property
     def value(self):
         return self._binding.get('document')
@@ -81,16 +110,93 @@ class DocumentPort(PythonPort, BaseDocumentPort):
     def value(self, value):
         if value != self.value:
             self._binding['document'] = value
-            self._context.update(modified_documents={ self.name: self.value })
 
-class GridPort(PythonPort, BaseGridPort):
+            mod_doc = {'documentId': self.document_id, 'document': self.value}
+
+            if getattr(self, 'index', None) is not None:
+                mod_doc['index'] = self.index
+
+            self._context.update(modified_documents={ self.name: mod_doc })
+
+class GridPort(PythonPort):
+    def __init__(self, context, port, binding):
+        super(GridPort, self).__init__(context, port, binding)
+
+        self.__dataset = None
+
+    def get(self, default=None):
+        return self.dataset if self.was_supplied else default
+
+    def upload_data(self, data, path=None, client=None, *args, **kwargs):
+        # The port MUST be an output port.
+        if self.direction != OUTPUT_PORT:
+            raise ValueError('The "upload data" operation is only valid for output ports.')
+
+        # If client not supplied, use the context's client.
+        if client is None:
+            client = self._context.thredds_upload_client
+            if client is None:
+                raise ValueError('No data upload client configured.')
+
+            # If the port's catalog URL is supplied AND the context has a TDS
+            # client configured, then the catalog URLs MUST match (since it is
+            # assumed the upload client is configured to upload to the same TDS
+            # server).
+            client_catalog_url = getattr(self._context.thredds_client, 'catalog_url', None)
+            if self.catalog_url != client_catalog_url:
+                raise ValueError('Data may only be uploaded to the environment\'s own TDS server.')
+
+        path = path or self.dataset_path
+
+        client.upload_data(data, path, *args, **kwargs)
+
+    @property
+    def dataset(self):
+        if self.__dataset is None:
+            from tds_client import Catalog, Dataset
+
+            client = self._context._get_thredds_client(self.catalog_url)
+
+            if client is not None:
+                catalog = Catalog(self.catalog_url, client)
+                self.__dataset = Dataset(catalog, self.dataset_path)
+
+        return self.__dataset
+
     @property
     def catalog_url(self):
-        return self._binding['catalog']
+        return self._binding.get('catalog')
 
     @property
     def dataset_path(self):
-        return self._binding['dataset']
+        return self._binding.get('dataset')
+
+class CollectionPort(PythonPort):
+    def __init__(self, context, port, binding, ports):
+        super(CollectionPort, self).__init__(context, port, binding)
+
+        for idx, p in enumerate(ports): # necessary to map back to response...
+            ports[idx].index = idx
+
+        self.__ports = ports
+
+    def get(self, default=None):
+        return self.__ports if self.was_supplied else (default or [])
+
+    def __getitem__(self, i):
+        return self.get()[i]
+
+    def __len__(self):
+        return len(self.get())
+
+    def __iter__(self):
+        return iter(self.get())
+
+    def __str__(self):
+        return ','.join(map(str, self.get()))
+
+    def __repr__(self):
+        return repr(self.get())
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
@@ -129,8 +235,15 @@ class Context(BaseContext):
         STREAM_PORT: StreamPort,
         MULTISTREAM_PORT: MultistreamPort,
         DOCUMENT_PORT: DocumentPort,
-        GRID_PORT: GridPort
+        GRID_PORT: GridPort,
+        STREAM_COLLECTION_PORT: StreamPort,
+        DOCUMENT_COLLECTION_PORT: DocumentPort,
+        GRID_COLLECTION_PORT: GridPort
     }
+
+    @staticmethod
+    def is_collection_port(porttype):
+        return porttype == STREAM_COLLECTION_PORT or porttype == GRID_COLLECTION_PORT or porttype == DOCUMENT_COLLECTION_PORT
 
     def __init__(self, model, job_request, args, updater):
         super(Context, self).__init__()
@@ -142,8 +255,16 @@ class Context(BaseContext):
         bindings = job_request.get('ports', {})
         for port in model.ports:
             try:
-                port_type = Context._port_type_map[port.type]
-                self.ports._add(port_type(self, port, bindings.get(port.name)))
+                binding = bindings.get(port.name, None)
+
+                if self.is_collection_port(port.type):
+                    binding_ports = binding.get('ports', []) if binding else []
+                    inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding_ports]
+                    self.ports._add(CollectionPort(self, port, binding, inner_ports))
+                else:
+                    port_type = Context._port_type_map[port.type]
+                    self.ports._add(port_type(self, port, binding))
+
             except KeyError:
                 raise ValueError('Unsupported port type "{}"'.format(port.type))
 
