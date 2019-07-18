@@ -1,14 +1,9 @@
 {
-    "baseImage": "6737f90e-a795-4e5b-923c-1513d2914720",
+    "baseImage": "da9b54b0-5467-4a9f-b59a-58525885ddc5",
     "organisationId": "test_org",
     "groupIds": [ "test_group" ],
-    "entrypoint": "model.py",
-    "dependencies": [
-        {
-            "name": "requests",
-            "provider": "PIP"
-        }
-    ],
+    "entrypoint": "model.R",
+    "dependencies": [],
     "models": [
         {
             "id": "noop",
@@ -165,14 +160,6 @@
         {
             "id": "test_error",
             "name": "Tests failing immediately",
-            "version": "0.0.1",
-            "description": "",
-            "method": "",
-            "ports": []
-        },
-        {
-            "id": "test_error_too_large",
-            "name": "Test large json is truncated",
             "version": "0.0.1",
             "description": "",
             "method": "",

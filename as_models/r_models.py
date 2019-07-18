@@ -1,5 +1,5 @@
 
-from .ports import DOCUMENT_PORT
+from .ports import DOCUMENT_PORT, OUTPUT_PORT
 from .sentinel import Sentinel
 
 import os
@@ -23,9 +23,10 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     from rpy2.robjects import r, conversion
     from rpy2.rinterface import NULL
     from rpy2.robjects.vectors import ListVector
+    import rpy2.rinterface as ri
 
     model_id = job_request['modelId']
-
+    model = manifest.models[model_id]
     # Load the model's module.
     module = r.source(entrypoint)
 
@@ -38,6 +39,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         raise RuntimeError('Member "{}" of model "{}" is not a callable function.'.format(model_id, entrypoint)) # TODO: more specific exception type?
 
     # Enable custom conversions.
+    # Requires rpy2==2.8.6 (r_requirements.txt)
     @conversion.py2ri.register(type(None))
     def convert_none(none):
         return NULL
@@ -46,8 +48,8 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
     r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
     r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration', None))
-    r_ports = _convert_ports(job_request.get('ports', {}))
-    r_update = _convert_update(updater.update)
+    r_ports = _convert_ports(model.ports, job_request.get('ports', {}))
+    r_update = _convert_update(updater.update, model, job_request.get('ports', {}))
     r_logger = _convert_logger(updater.log)
 
     # Create context object.
@@ -67,18 +69,33 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     updater.update() # Marks the job as running.
     implementation(ListVector(context))
 
-def _convert_ports(ports):
+def _convert_ports(model_ports, port_bindings):
     from rpy2.robjects.vectors import ListVector
 
     result = {}
-    for port_name, port_config in ports.items():
-        direction = port_config.pop('direction').lower()
+    for port in model_ports:
+        port_name = port.name
+        port_config = port_bindings.get(port_name, {})
 
-        result[str(port_name)] = ListVector(dict(
-            name=port_name,
-            direction=direction,
-            **{ str(k):v for k,v in port_config.items() }
-        ))
+        # AS-API sends model requests that also include the 'direction' property.
+        # as_models now uses the port direction from the manifest file.
+        # Make sure this property is removed here to avoid conflict.
+        if 'direction' in port_config:
+            port_config.pop('direction')
+
+        if 'ports' in port_config:
+            inner_ports = port_config['ports']
+
+            # to preserve order when returning results, inject the collection index
+            for idx, port in enumerate(inner_ports):
+                port['index'] = idx
+                if 'direction' in port:
+                    print('dropping direction...')
+                    port.pop('direction')
+
+            result[str(port_name)] = list(map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports))
+        else:
+            result[str(port_name)] = ListVector(dict(**{ str(k):v for k,v in port_config.items()}))
 
     return ListVector(result)
 
@@ -108,13 +125,13 @@ def _convert_service_config(config):
 
         return ListVector(result)
 
-def _convert_update(update):
+def _convert_update(update, model, port_bindings):
     import rpy2.rinterface as ri
     from rpy2.robjects.vectors import Vector, ListVector
 
     def wrapper(message=_SENTINEL, progress=_SENTINEL, modified_streams=_SENTINEL, modified_documents=_SENTINEL):
         update_kwargs = {}
-
+        
         if message not in (_SENTINEL, ri.NULL):
             update_kwargs['message'] = _extract_scalar(message)
         if progress not in (_SENTINEL, ri.NULL):
@@ -126,7 +143,7 @@ def _convert_update(update):
             for k,v in ListVector(modified_documents).items():
                 if not isinstance(v, Vector) or len(v) != 1:
                     raise ValueError('Value for document "{}" must be a scalar.'.format(k))
-                mod_docs[k] = str(_extract_scalar(v))
+                mod_docs[k] = {'document': str(_extract_scalar(v))}
 
         update(**update_kwargs)
 
