@@ -1,6 +1,6 @@
 
 from .context import BaseContext
-from .python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context
+from .python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context, CollectionPort
 from .util import resolve_service_config
 from . import ports
 from .manifest import Port
@@ -62,16 +62,35 @@ class Context(BaseContext):
     def configure_port(self, name, type, direction, stream_id=None, stream_ids=None, value=None, catalog_url=None, dataset_path=None):
         port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
 
-        if type == ports.STREAM_PORT:
-            self.ports._add(StreamPort(self, port, _generate_binding(stream_id, streamId=stream_id)))
-        elif type == ports.MULTISTREAM_PORT:
-            self.ports._add(MultistreamPort(self, port, _generate_binding(stream_ids, streamIds=stream_ids)))
-        elif type == ports.DOCUMENT_PORT:
-            self.ports._add(DocumentPort(self, port, _generate_binding(value, document=value)))
-        elif type == ports.GRID_PORT:
-            self.ports._add(GridPort(self, port, _generate_binding(dataset_path, catalog=catalog_url, dataset=dataset_path)))
-        else:
-            raise ValueError('Unsupported port type "{}"'.format(type))
+        try:
+            if self.is_collection_port(port.type):
+                binding_ports = []
+
+                if stream_ids:
+                    binding_ports = [_generate_binding(stream_id, stream_id=stream_id) for stream_id in stream_ids]
+
+                binding = {'ports': binding_ports}
+
+                inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding_ports]
+                self.ports._add(CollectionPort(self, port, binding, inner_ports))
+            else:
+                port_type = Context._port_type_map[port.type]
+
+                binding = None
+
+                if stream_id:
+                    binding = _generate_binding(stream_id, stream_id=stream_id)
+
+                if value:
+                    binding = _generate_binding(value, value=value)
+
+                if catalog_url and dataset_path:
+                    binding = _generate_binding(dataset_path, catalog=catalog_url, dataset=dataset_path)
+
+                self.ports._add(port_type(self, port, binding))
+
+        except KeyError:
+            raise ValueError('Unsupported port type "{}"'.format(port.type))
 
         return self
 
