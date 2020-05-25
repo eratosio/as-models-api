@@ -23,6 +23,9 @@ setup(
     install_requires = [
         'flask'
     ],
+    extras_require={
+        'r': ['rpy2==3.3.3'],
+    },
     classifiers = [
         'Development Status :: 3 - Alpha',
         'Topic :: Scientific/Engineering :: Information Analysis',

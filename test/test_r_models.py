@@ -1,3 +1,4 @@
+import sys
 from as_models.manifest import Model
 from as_models.ports import INPUT_PORT, DOCUMENT_PORT, DOCUMENT_COLLECTION_PORT, STREAM_COLLECTION_PORT, \
     GRID_COLLECTION_PORT, STREAM_PORT, GRID_PORT
@@ -6,6 +7,9 @@ import unittest
 
 from as_models.r_models import _convert_ports
 
+is_python_35_or_newer = sys.version_info[0] == 3 and sys.version_info[1] >= 5
+
+@unittest.skipIf(not is_python_35_or_newer, 'as-models r support not tested for python < v3')
 class ContextTests(unittest.TestCase):
     def test_ports(self):
         model = Model({

@@ -268,9 +268,14 @@ class HostTests(unittest.TestCase):
             self.assertTrue('something went wrong' in exception['msg'])
             self.assertTrue('Traceback' in exception['developer_msg'])
             self.assertTrue('something went wrong' in exception['developer_msg'])
-            self.assertTrue(self._all_logs[0]['level'] in ['CRITICAL', 'STDERR'],
-                            "expecting log error level of 'CRITICAL' or 'STDERR'")
 
+            if lang == 'python':
+                self.assertTrue(self._all_logs[0]['level'] in ['CRITICAL', 'STDERR'],
+                                "expecting log error level of 'CRITICAL' or 'STDERR'")
+            if lang == 'r':
+                # TODO: pycharm debugger might make line 0 a stderr line about resource allocation in debugger and make this test fail, make it less brittle.
+                self.assertTrue(self._all_logs[1]['level'] in ['CRITICAL', 'STDERR'],
+                                "expecting log error level of 'CRITICAL' or 'STDERR'")
     def test_large_json_string_is_reported(self):
         for lang in ['python']:
             # NB: no test for R, we do not support exposing the user_data via R yet.

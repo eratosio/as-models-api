@@ -6,14 +6,8 @@ services:
             dockerfile: ./docker/Dockerfile
         volumes:
             - ./:/home/testuser/as-models
-    python27tests:
-        extends:
-            service: base
-        working_dir: /home/testuser/as-models
-        command: "bash -c 'source ../venvs/venv27/bin/activate && python -m unittest discover || deactivate'"
     python35tests:
         extends:
             service: base
         working_dir: /home/testuser/as-models
         command: "bash -c 'source ../venvs/venv35/bin/activate && python -m unittest discover || deactivate'"
-

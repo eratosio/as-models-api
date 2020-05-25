@@ -1,8 +1,8 @@
 all_port_types_model <- function(context) {
     print('Running all_port_types_model')
 
-    input_documents = context$ports$input_documents
-    output_documents = context$ports$output_documents
+    input_documents <- context$ports$input_documents
+    output_documents <- context$ports$output_documents
 
     for (i in input_documents) {
         print(i)
