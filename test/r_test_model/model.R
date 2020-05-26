@@ -40,3 +40,7 @@ required_ports_model_in1_out1 <- function(context) {
 test_error <- function(context) {
     stop("something went wrong")
 }
+
+noop <- function(context) {
+    print('noop')
+}
