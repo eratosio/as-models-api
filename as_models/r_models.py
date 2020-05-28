@@ -1,8 +1,6 @@
-
+import os
 from .ports import DOCUMENT_PORT, OUTPUT_PORT
 from .sentinel import Sentinel
-
-import os
 
 try:
     import urlparse
@@ -14,10 +12,12 @@ except ImportError:
 
 _SENTINEL = Sentinel()
 
+
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
 
     return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.r')
+
 
 def run_model(entrypoint, manifest, job_request, args, updater):
     from rpy2.robjects import r, conversion
@@ -34,13 +34,17 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     try:
         implementation = r[model_id]
     except LookupError:
-        raise RuntimeError('Unable to locate function "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
+        # TODO: more specific exception type?
+        raise RuntimeError('Unable to locate function "{}" in model "{}".'.format(model_id,
+                                                                                  entrypoint))
     if not callable(implementation):
-        raise RuntimeError('Member "{}" of model "{}" is not a callable function.'.format(model_id, entrypoint)) # TODO: more specific exception type?
+        # TODO: more specific exception type?
+        raise RuntimeError('Member "{}" of model "{}" is not a callable function.'.format(model_id,
+                                                                                          entrypoint))
 
     # Enable custom conversions.
-    # Requires rpy2==2.8.6 (r_requirements.txt)
-    @conversion.py2ri.register(type(None))
+    # Requires rpy2==3.3.x (r_requirements.txt)
+    @conversion.py2rpy.register(type(None))
     def convert_none(none):
         return NULL
 
@@ -66,8 +70,9 @@ def run_model(entrypoint, manifest, job_request, args, updater):
         context['thredds_config'] = r_thredds_config
 
     # Run the implementation.
-    updater.update() # Marks the job as running.
+    updater.update()  # Marks the job as running.
     implementation(ListVector(context))
+
 
 def _convert_ports(model_ports, port_bindings):
     from rpy2.robjects.vectors import ListVector
@@ -87,23 +92,24 @@ def _convert_ports(model_ports, port_bindings):
             inner_ports = port_config['ports']
 
             # to preserve order when returning results, inject the collection index
-            for idx, port in enumerate(inner_ports):
-                port['index'] = idx
-                if 'direction' in port:
+            for idx, iport in enumerate(inner_ports):
+                iport['index'] = idx
+                if 'direction' in iport:
                     print('dropping direction...')
-                    port.pop('direction')
+                    iport.pop('direction')
 
-            result[str(port_name)] = list(map(lambda i: ListVector({ str(k):v for k,v in i.items()}), inner_ports))
+            result[str(port_name)] = list(map(lambda i: ListVector({str(k): v for k, v in i.items()}), inner_ports))
         else:
-            result[str(port_name)] = ListVector(dict(**{ str(k):v for k,v in port_config.items()}))
+            result[str(port_name)] = ListVector(dict(**{str(k): v for k, v in port_config.items()}))
 
     return ListVector(result)
+
 
 def _convert_service_config(config):
     from rpy2.robjects.vectors import ListVector
 
     if config is not None:
-        result = { 'url': config.get('url', None) }
+        result = {'url': config.get('url', None)}
 
         if result['url'] is None:
             scheme = config.get('scheme', 'http')
@@ -125,13 +131,14 @@ def _convert_service_config(config):
 
         return ListVector(result)
 
+
 def _convert_update(update, model, port_bindings):
     import rpy2.rinterface as ri
     from rpy2.robjects.vectors import Vector, ListVector
 
     def wrapper(message=_SENTINEL, progress=_SENTINEL, modified_streams=_SENTINEL, modified_documents=_SENTINEL):
         update_kwargs = {}
-        
+
         if message not in (_SENTINEL, ri.NULL):
             update_kwargs['message'] = _extract_scalar(message)
         if progress not in (_SENTINEL, ri.NULL):
@@ -140,7 +147,7 @@ def _convert_update(update, model, port_bindings):
             update_kwargs['modified_streams'] = set(modified_streams)
         if modified_documents not in (_SENTINEL, ri.NULL):
             mod_docs = update_kwargs['modified_documents'] = {}
-            for k,v in ListVector(modified_documents).items():
+            for k, v in ListVector(modified_documents).items():
                 if not isinstance(v, Vector) or len(v) != 1:
                     raise ValueError('Value for document "{}" must be a scalar.'.format(k))
                 mod_docs[k] = {'document': str(_extract_scalar(v))}
@@ -148,6 +155,7 @@ def _convert_update(update, model, port_bindings):
         update(**update_kwargs)
 
     return ri.rternalize(wrapper)
+
 
 def _convert_logger(logger):
     import rpy2.rinterface as ri
@@ -162,6 +170,7 @@ def _convert_logger(logger):
         logger(message, level, file, line, timestamp)
 
     return ri.rternalize(wrapper)
+
 
 def _extract_scalar(vector):
     return vector[0] if vector is not None and len(vector) == 1 else vector
