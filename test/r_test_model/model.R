@@ -1,8 +1,8 @@
 all_port_types_model <- function(context) {
     print('Running all_port_types_model')
 
-    input_documents = context$ports$input_documents
-    output_documents = context$ports$output_documents
+    input_documents <- context$ports$input_documents
+    output_documents <- context$ports$output_documents
 
     for (i in input_documents) {
         print(i)
@@ -39,4 +39,8 @@ required_ports_model_in1_out1 <- function(context) {
 
 test_error <- function(context) {
     stop("something went wrong")
+}
+
+noop <- function(context) {
+    print('noop')
 }
