@@ -7,9 +7,8 @@ import unittest
 
 from as_models.r_models import _convert_ports
 
-is_python_35_or_newer = sys.version_info[0] == 3 and sys.version_info[1] >= 5
 
-@unittest.skipIf(not is_python_35_or_newer, 'as-models r support not tested for python < v3')
+@unittest.skipIf(sys.version_info[:2] < (3, 5), 'as-models r support not tested for python < v3.5')
 class ContextTests(unittest.TestCase):
     def test_ports(self):
         model = Model({
