@@ -14,7 +14,11 @@ class TestTesting(unittest.TestCase):
         self.context.configure_port("stream[]", STREAM_COLLECTION_PORT, INPUT_PORT, stream_ids=["s1", "s2"])
 
         self.context.configure_port("doc", DOCUMENT_PORT, INPUT_PORT, value="abc")
+        self.context.configure_port("doc_empty_str", DOCUMENT_PORT, INPUT_PORT, value="")
+        self.context.configure_port("doc_none", DOCUMENT_PORT, INPUT_PORT, value=None)
         self.context.configure_port("doc[]", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=["v1", "v2"])
+        self.context.configure_port("doc_empty_str[]", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=["", "v2"])
+        self.context.configure_port("doc_empty_list[]", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=[])
 
         self.context.configure_port("docId", DOCUMENT_PORT, INPUT_PORT, document_id="d1")
         self.context.configure_port("docId[]", DOCUMENT_COLLECTION_PORT, INPUT_PORT, document_ids=["d1", "d2"])
@@ -27,8 +31,19 @@ class TestTesting(unittest.TestCase):
         self.assertEqual("s2", self.context.ports["stream[]"][1].stream_id)
 
         self.assertEqual("abc", self.context.ports["doc"].value)
+        self.assertEqual(True, self.context.ports["doc"].was_supplied)
+        # Is this assertion really the desired behaviour?
+        self.assertEqual(None, self.context.ports["doc_empty_str"].value)
+        # Is this assertion really the desired behaviour?
+        self.assertEqual(False, self.context.ports["doc_empty_str"].was_supplied)
+        self.assertEqual(None, self.context.ports["doc_none"].value)
+        self.assertEqual(False, self.context.ports["doc_none"].was_supplied)
         self.assertEqual("v1", self.context.ports["doc[]"][0].value)
         self.assertEqual("v2", self.context.ports["doc[]"][1].value)
+        self.assertEqual("", self.context.ports["doc_empty_str[]"][0].value)
+        self.assertEqual("v2", self.context.ports["doc_empty_str[]"][1].value)
+        self.assertEqual(0, len(self.context.ports["doc_empty_list[]"]))
+        self.assertEqual(True, self.context.ports["doc_empty_list[]"].was_supplied)
 
         self.assertEqual("d1", self.context.ports["docId"].document_id)
         self.assertEqual("d1", self.context.ports["docId[]"][0].document_id)
