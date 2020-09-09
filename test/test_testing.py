@@ -32,10 +32,8 @@ class TestTesting(unittest.TestCase):
 
         self.assertEqual("abc", self.context.ports["doc"].value)
         self.assertEqual(True, self.context.ports["doc"].was_supplied)
-        # Is this assertion really the desired behaviour?
-        self.assertEqual(None, self.context.ports["doc_empty_str"].value)
-        # Is this assertion really the desired behaviour?
-        self.assertEqual(False, self.context.ports["doc_empty_str"].was_supplied)
+        self.assertEqual("", self.context.ports["doc_empty_str"].value)
+        self.assertEqual(True, self.context.ports["doc_empty_str"].was_supplied)
         self.assertEqual(None, self.context.ports["doc_none"].value)
         self.assertEqual(False, self.context.ports["doc_none"].was_supplied)
         self.assertEqual("v1", self.context.ports["doc[]"][0].value)
