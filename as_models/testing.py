@@ -111,7 +111,7 @@ class Context(BaseContext):
                 if stream_id:
                     binding = _generate_binding(stream_id, streamId=stream_id)
 
-                if value:
+                if value is not None:
                     binding = _generate_binding(value, document=value)
 
                 if document_id:
