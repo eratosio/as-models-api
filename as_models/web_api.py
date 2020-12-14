@@ -1,23 +1,34 @@
 
 from __future__ import print_function
 
+import copy
+import datetime
+import json
+import logging
+import multiprocessing
+import os
+import signal
+import sys
+import time
+import traceback
+from flask import Flask, jsonify, make_response, request
+
+from . import log_levels, python_models, r_models
+from .exceptions import SenapsModelError
+from .manifest import Manifest
+from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, \
     INPUT_PORT
-from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
-from .manifest import Manifest
-from .exceptions import SenapsModelError
 from .util import sanitize_dict_for_json
-from . import log_levels, python_models, r_models
-
-import copy
-import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
-from flask import Flask, jsonify, make_response, request
+from .version import __version__
 
 _SENTINEL = Sentinel()
 
+
 def _signalterm_handler(signal, stack):
     exit(0)
+
 
 def _determine_runtime_type(entrypoint, args):
     try:
@@ -28,6 +39,7 @@ def _determine_runtime_type(entrypoint, args):
         elif r_models.is_valid_entrypoint(entrypoint):
             return 'r'
 
+
 class _Updater(object):
     def __init__(self, sender):
         self._sender = sender
@@ -37,11 +49,11 @@ class _Updater(object):
         self._modified_documents = {}
 
     def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
-        update = { k:v for k,v in {
+        update = {k: v for k, v in {
             'state': RUNNING,
             'message': message,
             'progress': progress
-        }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL)) }
+        }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL))}
 
         self._modified_streams.update(modified_streams)
 
@@ -60,7 +72,8 @@ class _Updater(object):
 
     def log(self, message, level=None, file=None, line=None, timestamp=None, logger=None):
         if level is not None and level not in log_levels.LEVELS:
-            raise ValueError('Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
+            raise ValueError(
+                'Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
 
         message = message.rstrip() if message else None
 
@@ -79,7 +92,8 @@ class _Updater(object):
             'logger': logger
         }
 
-        self._sender.send({ 'log': [ log_entry ] })
+        self._sender.send({'log': [log_entry]})
+
 
 class _JobProcessLogHandler(logging.Handler):
     def __init__(self, updater):
@@ -94,9 +108,11 @@ class _JobProcessLogHandler(logging.Handler):
             level=log_levels.from_stdlib_levelno(record.levelno),
             file=record.filename or None,
             line=record.lineno,
-            timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+            timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
+                int(record.msecs) % 1000),
             logger=record.name
         )
+
 
 class StreamRedirect(object):
     def __init__(self, original_stream, updater, log_level):
@@ -110,6 +126,7 @@ class StreamRedirect(object):
 
     def flush(self):
         self._original_stream.flush()
+
 
 class _JobProcess(object):
     def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger):
@@ -149,7 +166,7 @@ class _JobProcess(object):
         })
 
     def __call__(self):
-        model_id = None     # pre-declare this so the name exists later if an exception occurs.
+        model_id = None  # pre-declare this so the name exists later if an exception occurs.
         signal.signal(signal.SIGTERM, _signalterm_handler)
 
         updater = _Updater(self._sender)
@@ -198,7 +215,7 @@ class _JobProcess(object):
                     results[port.name] = {'type': port.type}
                 elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
                     results[port.name] = {'type': port.type, 'outdatedStreams': list(
-                    mod_streams.intersection(binding.get('streamIds', [])))}
+                        mod_streams.intersection(binding.get('streamIds', [])))}
                 elif port.type == DOCUMENT_PORT and port.name in mod_docs:
                     document_update = mod_docs[port.name]
                     document_update['type'] = port.type
@@ -243,16 +260,18 @@ class _WebAPILogHandler(logging.Handler):
             'level': log_levels.from_stdlib_levelno(record.levelno),
             'file': record.filename or None,
             'lineNumber': record.lineno,
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
+                int(record.msecs) % 1000),
             'logger': record.name
         })
+
 
 app = Flask(__name__)
 
 _process = _receiver = _state = _model_complete = _root_logger = _logger = None
 
-def _reset():
 
+def _reset():
     global _process, _receiver, _state, _model_complete, _root_logger, _logger
 
     _process = _receiver = None
@@ -268,8 +287,8 @@ def _reset():
 
 _reset()
 
-
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
+
 
 def _load_entrypoint(path):
     path = os.path.abspath(path)
@@ -301,7 +320,7 @@ def _get_state():
                 _state.setdefault('log', []).extend(update.pop('log', []))
                 _state.update(update)
         except EOFError as e:
-            print(e) # TODO: handle better
+            print(e)  # TODO: handle better
 
     ret_val = copy.deepcopy(_state)
     # CPS-952: purge old log messages.
@@ -311,6 +330,8 @@ def _get_state():
             # count backwards always deleting the 0th item.
             # allows us to avoid clobbering incoming messages while we work.
             del _state['log'][0]
+
+    ret_val['api_version'] = __version__
 
     return ret_val
 
@@ -338,12 +359,13 @@ def _handle_failed_child_process(sender):
 def _get_root():
     return jsonify(_get_state())
 
+
 @app.route('/', methods=['POST'])
 def _post_root():
     global _process, _receiver
 
     if _process is not None and _process.is_alive():
-        return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
+        return make_response(jsonify({'error': 'Cannot submit new job - job already running.'}), 409)
 
     _reset()
 
@@ -361,7 +383,8 @@ def _post_root():
     except KeyError:
         return make_response(jsonify({'error': 'Unknown model "{}".'.format(model_id)}), 500)
 
-    missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
+    missing_ports = [port.name for port in model.ports if
+                     port.required and (port.name not in job_request.get('ports', {}))]
 
     if missing_ports:
         _logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
@@ -373,14 +396,15 @@ def _post_root():
 
     _receiver, sender = multiprocessing.Pipe(False)
 
-    #CS: Dsiabling for now to test graincast workflows.
+    # CS: Dsiabling for now to test graincast workflows.
     # signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
 
-    _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
+    _process = multiprocessing.Process(
+        target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
 
-
     return _get_root()
+
 
 @app.route('/terminate', methods=['POST'])
 def _post_terminate():

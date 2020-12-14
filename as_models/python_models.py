@@ -1,21 +1,25 @@
 
-from .context import BaseContext
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT
-from . import models
-from .util import resolve_service_config, urlparse
+import importlib
+import os
+import sys
 
 from senaps_sensor.api import API
-
 from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
 from tds_client.util import urls
 
-import importlib, os, sys
+from . import models
+from .context import BaseContext
+from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
+                    DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
+from .util import resolve_service_config
+
 
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
 
     return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.py')
+
 
 def run_model(entrypoint, manifest, job_request, args, updater):
     model_id = job_request['modelId']
@@ -33,11 +37,13 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     except KeyError:
         implementation = getattr(module, model_id, None)
     if not callable(implementation):
-        raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
+        # TODO: more specific exception type here?
+        raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint))
 
     # Run the callable.
-    updater.update() # Marks the job as running.
+    updater.update()  # Marks the job as running.
     implementation(Context(model, job_request, args, updater))
+
 
 def session_for_auth(auth, verify=None):
     from requests import Session
@@ -48,8 +54,10 @@ def session_for_auth(auth, verify=None):
 
     return session
 
+
 def urlpath(url):
     return urls.urlparse(url).path
+
 
 class PythonPort(object):
     def __init__(self, context, port, binding):
@@ -78,6 +86,7 @@ class PythonPort(object):
     def _context(self):
         return self.__context
 
+
 class StreamPort(PythonPort):
     def get(self, default=None):
         return self.stream_id if self.was_supplied else default
@@ -85,6 +94,7 @@ class StreamPort(PythonPort):
     @property
     def stream_id(self):
         return self._binding.get('streamId')
+
 
 class MultistreamPort(PythonPort):
     def get(self, default=None):
@@ -94,7 +104,14 @@ class MultistreamPort(PythonPort):
     def stream_ids(self):
         return self._binding.get('streamIds')
 
+
 class DocumentPort(PythonPort):
+    def __init__(self, context, port, binding):
+        super(DocumentPort, self).__init__(context, port, binding)
+
+        self.__document = None
+        self.__value = None
+
     def get(self, default=None):
         return self.value if self.was_supplied else default
 
@@ -104,19 +121,43 @@ class DocumentPort(PythonPort):
 
     @property
     def value(self):
-        return self._binding.get('document')
+        if self.__value is None:
+            try:
+                # For backwards compatibility, check if the document value is specified directly in the binding.
+                self.__value = self._binding['document']
+            except KeyError:
+                # Otherwise, load the document by its ID.
+                self.__value = self._context.analysis_client.get_document_value(self.document_id)
+
+        return self.__value
 
     @value.setter
     def value(self, value):
         if value != self.value:
-            self._binding['document'] = value
+            self.__value = value
+            self._context.analysis_client.set_document_value(self.__get_document(), value=value)
+            self.mark_updated()
 
-            mod_doc = {'documentId': self.document_id, 'document': self.value}
+    def download(self, path):
+        self._context.analysis_client.get_document_value(self.document_id, path=path)
 
-            if getattr(self, 'index', None) is not None:
-                mod_doc['index'] = self.index
+    def upload(self, path):
+        self._context.analysis_client.set_document_value(self.__get_document(), path=path)
+        self.mark_updated()
 
-            self._context.update(modified_documents={ self.name: mod_doc })
+    def mark_updated(self):
+        mod_doc = {'documentId': self.document_id}
+
+        if getattr(self, 'index', None) is not None:
+            mod_doc['index'] = self.index
+
+        self._context.update(modified_documents={self.name: mod_doc})
+
+    def __get_document(self):
+        if self.__document is None:
+            self.__document = self._context.analysis_client.get_document(self.document_id)
+        return self.__document
+
 
 class GridPort(PythonPort):
     def __init__(self, context, port, binding):
@@ -171,6 +212,7 @@ class GridPort(PythonPort):
     def dataset_path(self):
         return self._binding.get('dataset')
 
+
 class CollectionPort(PythonPort):
     def __init__(self, context, port, binding, ports):
         super(CollectionPort, self).__init__(context, port, binding)
@@ -197,6 +239,7 @@ class CollectionPort(PythonPort):
 
     def __repr__(self):
         return repr(self.get())
+
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
@@ -229,6 +272,7 @@ class SenapsSearchStrategy(QuickSearchStrategy):
             catalogs.insert(0, Catalog(catalog_url, org_catalog.client))
 
         return catalogs
+
 
 class Context(BaseContext):
     _port_type_map = {
