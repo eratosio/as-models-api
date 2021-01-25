@@ -3,6 +3,7 @@ import importlib
 import os
 import sys
 
+from requests.adapters import HTTPAdapter
 from senaps_sensor.api import API
 from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
@@ -10,9 +11,19 @@ from tds_client.util import urls
 
 from . import models
 from .context import BaseContext
+from .kong_support import KongRetry
 from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
                     DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
 from .util import resolve_service_config
+
+
+RETRY_STRATEGY = KongRetry(
+    total=5,
+    status_forcelist=[429, 500, 502, 503, 504],
+    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'POST'],
+    backoff_factor=0.5
+)
+HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
 
 
 def is_valid_entrypoint(entrypoint):
@@ -51,6 +62,9 @@ def session_for_auth(auth, verify=None):
     session = Session()
     session.verify = verify
     session.auth = auth
+
+    session.mount('http://', HTTP_ADAPTER)
+    session.mount('https://', HTTP_ADAPTER)
 
     return session
 
