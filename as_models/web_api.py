@@ -12,13 +12,12 @@ import sys
 import time
 import traceback
 from flask import Flask, jsonify, make_response, request
+import warnings
 
 from . import log_levels, python_models, r_models
 from .exceptions import SenapsModelError
 from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, \
-    INPUT_PORT
 from .sentinel import Sentinel
 from .util import sanitize_dict_for_json
 from .version import __version__
@@ -45,26 +44,20 @@ class _Updater(object):
         self._sender = sender
 
         self._state = {}
-        self._modified_streams = set()
-        self._modified_documents = {}
 
     def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
+        if modified_streams:
+            warnings.warn('Usage of modified_streams argument is deprecated and will be removed in a future version',
+                          DeprecationWarning)
+        if modified_documents:
+            warnings.warn('Usage of modified_documents argument is deprecated and will be removed in a future version',
+                          DeprecationWarning)
+
         update = {k: v for k, v in {
             'state': RUNNING,
             'message': message,
             'progress': progress
         }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL))}
-
-        self._modified_streams.update(modified_streams)
-
-        for port_name, mod_doc in modified_documents.items():
-            if type(mod_doc) != str and 'index' in mod_doc:
-                # must be a collection update...
-                if port_name not in self._modified_documents:
-                    self._modified_documents[port_name] = []
-                self._modified_documents[port_name].append(mod_doc)
-            else:
-                self._modified_documents[port_name] = mod_doc
 
         if update:
             self._state.update(update)
@@ -194,51 +187,9 @@ class _JobProcess(object):
             _model_complete.value = 1
             logger.debug('Implementation method for model %s returned.', model_id)
 
-            # Update ports (generate "results").
-            # TODO: this could probably be neater.
-            mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
-            results = {}
-
-            bindings = self._job_request['ports']
-
-            for port in self._manifest.models[model_id].ports:
-                # only write results for output ports...
-                if port.direction == INPUT_PORT:
-                    continue
-
-                try:
-                    binding = bindings[port.name]
-                except KeyError:
-                    continue
-
-                if port.type == STREAM_PORT and binding.get('streamId') in mod_streams:
-                    results[port.name] = {'type': port.type}
-                elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
-                    results[port.name] = {'type': port.type, 'outdatedStreams': list(
-                        mod_streams.intersection(binding.get('streamIds', [])))}
-                elif port.type == DOCUMENT_PORT and port.name in mod_docs:
-                    document_update = mod_docs[port.name]
-                    document_update['type'] = port.type
-
-                    if 'documentId' not in document_update and 'documentId' in binding:
-                        document_update['documentId'] = binding.get('documentId')
-
-                    results[port.name] = document_update
-
-                elif port.type == DOCUMENT_COLLECTION_PORT and port.name in mod_docs:
-                    inner_documents = mod_docs[port.name]
-                    inner_bindings = binding.get('ports')
-
-                    for document_update in inner_documents:
-                        if 'documentId' not in document_update and 'index' in document_update:
-                            document_update['documentId'] = inner_bindings[document_update['index']].get('documentId')
-
-                    results[port.name] = {'type': port.type, 'ports': inner_documents}
-
             self._sender.send({
                 'state': COMPLETE,
-                'progress': 1.0,
-                'results': results
+                'progress': 1.0
             })
         except BaseException as e:
             logger.critical('Model failed with exception: %s', e)

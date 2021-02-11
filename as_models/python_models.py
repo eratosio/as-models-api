@@ -150,22 +150,12 @@ class DocumentPort(PythonPort):
         if value != self.value:
             self.__value = value
             self._context.analysis_client.set_document_value(self.__get_document(), value=value)
-            self.mark_updated()
 
     def download(self, path):
         self._context.analysis_client.get_document_value(self.document_id, path=path)
 
     def upload(self, path):
         self._context.analysis_client.set_document_value(self.__get_document(), path=path)
-        self.mark_updated()
-
-    def mark_updated(self):
-        mod_doc = {'documentId': self.document_id}
-
-        if getattr(self, 'index', None) is not None:
-            mod_doc['index'] = self.index
-
-        self._context.update(modified_documents={self.name: mod_doc})
 
     def __get_document(self):
         if self.__document is None:
@@ -333,7 +323,7 @@ class Context(BaseContext):
 
         self._sensor_client = self._analysis_client = self._thredds_client = self._thredds_upload_client = None
 
-    def update(self, *args, **kwargs): # TODO: fix method signature
+    def update(self, *args, **kwargs):  # TODO: fix method signature
         self._updater.update(*args, **kwargs)
 
     @property
