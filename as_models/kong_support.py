@@ -23,11 +23,11 @@ class KongRetry(Retry):
         kwargs['backoff_time'] = self.__backoff_time
         return super().new(*args, **kwargs)
 
-    def increment(self, method, url, response, *args, **kwargs):
+    def increment(self, method=None, url=None, response=None, error=None, _pool=None, _stacktrace=None):
         if response and (response.status == 429):
             self.__backoff_time = KongRetry.__backoff_from_headers(response.getheaders())
 
-        return super().increment(method, url, response, *args, **kwargs)
+        return super().increment(method, url, response, error, _pool, _stacktrace)
 
     def get_backoff_time(self):
         return self.__backoff_time or super().get_backoff_time()
