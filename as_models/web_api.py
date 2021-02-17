@@ -220,7 +220,7 @@ class _WebAPILogHandler(logging.Handler):
 
 app = Flask(__name__)
 
-_process = _receiver = _state = _model_complete = _root_logger = _logger = None
+_process = _receiver = _state = _model_complete = _root_logger = _logger = _model_id = None
 
 
 def _reset():
@@ -268,15 +268,21 @@ def _get_state():
     state = _state.get('state', None)
 
     if (_process is not None) and (not _process.is_alive()) and (state not in (COMPLETE, FAILED, TERMINATED)):
-        _logger.error('Model process appears to have terminated abnormally. Waiting five seconds for process cleanup.')
+        _logger.critical('Model process has terminated abnormally. Waiting five seconds for process cleanup.')
         _process.join(5)
 
         if _process.exitcode is None:
             _logger.error('Failed to clean up model process.')
         elif _process.exitcode < 0:
-            _logger.info('Success. Model process exit code was {}.'.format(_process.exitcode))
+            _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
 
         _state['state'] = state = FAILED
+        _state['exception'] = {
+            'developer_msg': 'Model process terminated abnormally',
+            'msg': 'Model process terminated abnormally',
+            'data': {'exitCode': _process.exitcode},
+            'model_id': _model_id
+        }
 
     if (None not in (_process, _receiver)) and (state in (None, PENDING, RUNNING)):
         try:
@@ -335,7 +341,7 @@ def _get_root():
 
 @app.route('/', methods=['POST'])
 def _post_root():
-    global _process, _receiver
+    global _process, _receiver, _model_id
 
     if _process is not None and _process.is_alive():
         return make_response(jsonify({'error': 'Cannot submit new job - job already running.'}), 409)
@@ -345,16 +351,16 @@ def _post_root():
     job_request = request.get_json(force=True, silent=True) or {}
 
     try:
-        model_id = job_request['modelId']
+        _model_id = job_request['modelId']
     except KeyError:
         return make_response(jsonify({'error': 'Required property "modelId" is missing.'}), 400)
 
     manifest, entrypoint = _load_entrypoint(app.config['model_path'])
 
     try:
-        model = manifest.models[model_id]
+        model = manifest.models[_model_id]
     except KeyError:
-        return make_response(jsonify({'error': 'Unknown model "{}".'.format(model_id)}), 500)
+        return make_response(jsonify({'error': 'Unknown model "{}".'.format(_model_id)}), 500)
 
     missing_ports = [port.name for port in model.ports if
                      port.required and (port.name not in job_request.get('ports', {}))]
