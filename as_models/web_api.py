@@ -19,6 +19,7 @@ from .exceptions import SenapsModelError
 from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
+from .stats import get_peak_memory_usage
 from .util import sanitize_dict_for_json
 from .version import __version__
 
@@ -144,7 +145,7 @@ class _JobProcess(object):
         developer_msg = ''
         if tb is not None:
             # it should only be able to be None if another exception is raised on this thread
-            # or someone invoked exc_clear prior to use consuming it.
+            # or someone invoked exc_clear prior to us consuming it.
             developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         msg = exc.msg if type(exc) == SenapsModelError else str(exc)
@@ -264,7 +265,20 @@ def _load_entrypoint(path):
 
 
 def _get_state():
-    if (None not in (_process, _receiver)) and (_state.get('state', None) in (None, PENDING, RUNNING)):
+    state = _state.get('state', None)
+
+    if (_process is not None) and (not _process.is_alive()) and (state not in (COMPLETE, FAILED, TERMINATED)):
+        _logger.error('Model process appears to have terminated abnormally. Waiting five seconds for process cleanup.')
+        _process.join(5)
+
+        if _process.exitcode is None:
+            _logger.error('Failed to clean up model process.')
+        elif _process.exitcode < 0:
+            _logger.info('Success. Model process exit code was {}.'.format(_process.exitcode))
+
+        _state['state'] = state = FAILED
+
+    if (None not in (_process, _receiver)) and (state in (None, PENDING, RUNNING)):
         try:
             while _receiver.poll():
                 update = _receiver.recv()
@@ -283,6 +297,14 @@ def _get_state():
             del _state['log'][0]
 
     ret_val['api_version'] = __version__
+
+    if _process is not None:
+        try:
+            ret_val['stats'] = {
+                'peakMemoryUsage': get_peak_memory_usage(_process.pid)
+            }
+        except Exception:
+            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
 
     return ret_val
 
@@ -362,7 +384,7 @@ def _post_terminate():
     args = request.get_json(force=True, silent=True) or {}
     timeout = args.get('timeout', 0.0)
 
-    _logger.info('Received terminate message. Waiting %.2f seconds for model to terminate.', timeout)
+    _logger.debug('Received terminate message. Waiting %.2f seconds for model to terminate.', timeout)
 
     _process.terminate()
     _process.join(timeout)
@@ -371,7 +393,7 @@ def _post_terminate():
         _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
         os.kill(_process.pid, signal.SIGKILL)
     else:
-        _logger.info('Model shut down cleanly.')
+        _logger.debug('Model shut down cleanly.')
 
     if _state['state'] not in (COMPLETE, FAILED):
         _state['state'] = TERMINATED
