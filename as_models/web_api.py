@@ -24,6 +24,7 @@ from .util import sanitize_dict_for_json
 from .version import __version__
 
 _SENTINEL = Sentinel()
+_ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
 
 
 def _signalterm_handler(signal, stack):
@@ -220,7 +221,7 @@ class _WebAPILogHandler(logging.Handler):
 
 app = Flask(__name__)
 
-_process = _receiver = _state = _model_complete = _root_logger = _logger = _model_id = None
+_process = _receiver = _state = _model_complete = _root_logger = _logger = _model_id = _failed_timestamp = None
 
 
 def _reset():
@@ -267,23 +268,6 @@ def _load_entrypoint(path):
 def _get_state():
     state = _state.get('state', None)
 
-    if (_process is not None) and (not _process.is_alive()) and (state not in (COMPLETE, FAILED, TERMINATED)):
-        _logger.critical('Model process has terminated abnormally. Waiting five seconds for process cleanup.')
-        _process.join(5)
-
-        if _process.exitcode is None:
-            _logger.error('Failed to clean up model process.')
-        elif _process.exitcode < 0:
-            _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
-
-        _state['state'] = state = FAILED
-        _state['exception'] = {
-            'developer_msg': 'Model process terminated abnormally',
-            'msg': 'Model process terminated abnormally',
-            'data': {'exitCode': _process.exitcode},
-            'model_id': _model_id
-        }
-
     if (None not in (_process, _receiver)) and (state in (None, PENDING, RUNNING)):
         try:
             while _receiver.poll():
@@ -292,6 +276,8 @@ def _get_state():
                 _state.update(update)
         except EOFError as e:
             print(e)  # TODO: handle better
+
+    _check_for_abnormal_termination()
 
     ret_val = copy.deepcopy(_state)
     # CPS-952: purge old log messages.
@@ -304,7 +290,7 @@ def _get_state():
 
     ret_val['api_version'] = __version__
 
-    if _process is not None:
+    if (_process is not None) and _process.is_alive():
         try:
             ret_val['stats'] = {
                 'peakMemoryUsage': get_peak_memory_usage(_process.pid)
@@ -315,23 +301,42 @@ def _get_state():
     return ret_val
 
 
-def _handle_failed_child_process(sender):
-    while _process is not None and _process.is_alive():
-        # Attempt to reap an exited child process.
-        try:
-            pid, exit_code = os.waitpid(-1, os.WNOHANG)
-        except OSError:
-            break
+def _check_for_abnormal_termination():
+    global _failed_timestamp, _process, _state
 
-        # If the child process is the model process and it hasn't completed
-        # properly, flag a failure.
-        if (pid == _process.pid) and not _model_complete.value:
-            sender.send({
-                'state': FAILED,
-                'message': 'Model process terminated abnormally with exit code {}.'.format(exit_code)
-            })
-        elif pid == 0:
-            break
+    # Don't bother continuing if the model process hasn't started yet, is still running, or has already been marked
+    # finished.
+    if _process is None or _process.is_alive() or _state.get('state') in (COMPLETE, FAILED, TERMINATED):
+        return
+
+    # Record the time at which the model process is first detected to have failed.
+    if _failed_timestamp is None:
+        _failed_timestamp = time.time()
+
+    # Allow up to _ABNORMAL_TERMINATION_GRACE_PERIOD seconds for any pending messages from the model to come through the
+    # IPC pipe.
+    if (time.time() - _failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD:
+        return
+
+    # At this point, the model must have terminated abnormally and the grace period elapsed. Attempt to clean up the
+    # defunct process.
+    _logger.critical('Model process has terminated abnormally. Waiting {}} seconds for process cleanup.'.format(
+        _ABNORMAL_TERMINATION_GRACE_PERIOD
+    ))
+    _process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
+
+    if _process.exitcode is None:
+        _logger.error('Failed to clean up model process.')
+    elif _process.exitcode < 0:
+        _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
+
+    _state['state'] = FAILED
+    _state['exception'] = {
+        'developer_msg': 'Model "{}" terminated with exit code {}.'.format(_model_id,_process.exitcode),
+        'msg': 'Model "{}" terminated abnormally.'.format(_model_id),
+        'data': sanitize_dict_for_json({'exitCode': _process.exitcode}),
+        'model_id': _model_id
+    }
 
 
 @app.route('/', methods=['GET'])
@@ -375,9 +380,6 @@ def _post_root():
 
     _receiver, sender = multiprocessing.Pipe(False)
 
-    # CS: Dsiabling for now to test graincast workflows.
-    # signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
-
     _process = multiprocessing.Process(
         target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
@@ -404,7 +406,7 @@ def _post_terminate():
     if _state['state'] not in (COMPLETE, FAILED):
         _state['state'] = TERMINATED
 
-    # Make best-effort attempt the web API.
+    # Make best-effort attempt to stop the web API.
     func = request.environ.get('werkzeug.server.shutdown')
     if callable(func):
         func()
