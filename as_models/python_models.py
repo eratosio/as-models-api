@@ -123,6 +123,8 @@ class DocumentPort(PythonPort):
     def __init__(self, context, port, binding):
         super(DocumentPort, self).__init__(context, port, binding)
 
+        self.__document_id = binding['documentId']
+
         self.__document = None
         self.__value = None
 
@@ -131,7 +133,7 @@ class DocumentPort(PythonPort):
 
     @property
     def document_id(self):
-        return self._binding.get('documentId')
+        return self.__document_id
 
     @property
     def value(self):
@@ -147,7 +149,7 @@ class DocumentPort(PythonPort):
 
     @value.setter
     def value(self, value):
-        if value != self.value:
+        if value != self.__value:
             self.__value = value
             self._context.analysis_client.set_document_value(self.__get_document(), value=value)
 
