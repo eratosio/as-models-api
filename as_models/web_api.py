@@ -320,7 +320,7 @@ def _check_for_abnormal_termination():
 
     # At this point, the model must have terminated abnormally and the grace period elapsed. Attempt to clean up the
     # defunct process.
-    _logger.critical('Model process has terminated abnormally. Waiting {}} seconds for process cleanup.'.format(
+    _logger.critical('Model process has terminated abnormally. Waiting {} seconds for process cleanup.'.format(
         _ABNORMAL_TERMINATION_GRACE_PERIOD
     ))
     _process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
