@@ -123,8 +123,6 @@ class DocumentPort(PythonPort):
     def __init__(self, context, port, binding):
         super(DocumentPort, self).__init__(context, port, binding)
 
-        self.__document_id = binding['documentId']
-
         self.__document = None
         self.__value = None
 
@@ -133,7 +131,7 @@ class DocumentPort(PythonPort):
 
     @property
     def document_id(self):
-        return self.__document_id
+        return self._binding.get('documentId') if self._binding else None
 
     @property
     def value(self):
@@ -151,7 +149,9 @@ class DocumentPort(PythonPort):
     def value(self, value):
         if value != self.__value:
             self.__value = value
-            self._context.analysis_client.set_document_value(self.__get_document(), value=value)
+
+            if self.was_supplied:
+                self._context.analysis_client.set_document_value(self.__get_document(), value=value)
 
     def download(self, path):
         self._context.analysis_client.get_document_value(self.document_id, path=path)
