@@ -379,9 +379,16 @@ def _post_root():
     _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
 
     _receiver, sender = multiprocessing.Pipe(False)
+    job_process = _JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger)
 
-    _process = multiprocessing.Process(
-        target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
+    try:
+        with multiprocessing.get_context('spawn') as mp:
+            _process = mp.Process(target=job_process)
+    except (AttributeError, ValueError):
+        # AttributeError if running pre-3.4 Python (and get_context() is therefore unavailable); ValueError if "spawn"
+        # is unsupported.
+        _process = multiprocessing.Process(target=job_process)
+
     _process.start()
 
     return _get_root()
