@@ -14,6 +14,8 @@ import traceback
 from flask import Flask, jsonify, make_response, request
 import warnings
 
+from werkzeug.exceptions import InternalServerError
+
 from . import log_levels, python_models, r_models
 from .exceptions import SenapsModelError
 from .manifest import Manifest
@@ -330,13 +332,53 @@ def _check_for_abnormal_termination():
     elif _process.exitcode < 0:
         _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
 
+    _fail_with_exception(
+        'Model "{}" terminated abnormally.'.format(_model_id),
+        'Model "{}" terminated with exit code {}.'.format(_model_id, _process.exitcode),
+        {
+            'exitCode': _process.exitcode
+        }
+    )
+
+
+def _fail_with_exception(message, dev_message, data):
     _state['state'] = FAILED
     _state['exception'] = {
-        'developer_msg': 'Model "{}" terminated with exit code {}.'.format(_model_id,_process.exitcode),
-        'msg': 'Model "{}" terminated abnormally.'.format(_model_id),
-        'data': sanitize_dict_for_json({'exitCode': _process.exitcode}),
+        'developer_msg': dev_message,
+        'msg': message,
+        'data': sanitize_dict_for_json(data),
         'model_id': _model_id
     }
+
+
+def terminate(timeout=0.0):
+    _logger.debug('Waiting %.2f seconds for model to terminate.', timeout)
+
+    _process.terminate()
+    _process.join(timeout)
+
+    if _process.is_alive():
+        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
+        os.kill(_process.pid, signal.SIGKILL)
+    else:
+        _logger.debug('Model shut down cleanly.')
+
+    if _state['state'] not in (COMPLETE, FAILED):
+        _state['state'] = TERMINATED
+
+    # Make best-effort attempt to stop the web API.
+    func = request.environ.get('werkzeug.server.shutdown')
+    if callable(func):
+        func()
+    else:
+        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+
+
+def _get_traceback(exc):
+    try:
+        return ''.join(traceback.format_tb(exc.__traceback__))
+    except AttributeError:
+        pass
 
 
 @app.route('/', methods=['GET'])
@@ -399,25 +441,26 @@ def _post_terminate():
     args = request.get_json(force=True, silent=True) or {}
     timeout = args.get('timeout', 0.0)
 
-    _logger.debug('Received terminate message. Waiting %.2f seconds for model to terminate.', timeout)
-
-    _process.terminate()
-    _process.join(timeout)
-
-    if _process.is_alive():
-        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
-        os.kill(_process.pid, signal.SIGKILL)
-    else:
-        _logger.debug('Model shut down cleanly.')
-
-    if _state['state'] not in (COMPLETE, FAILED):
-        _state['state'] = TERMINATED
-
-    # Make best-effort attempt to stop the web API.
-    func = request.environ.get('werkzeug.server.shutdown')
-    if callable(func):
-        func()
-    else:
-        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+    terminate(timeout)
 
     return _get_root()
+
+
+@app.errorhandler(InternalServerError)
+def handle_500(e):
+    cause = getattr(e, "original_exception", e)
+
+    message = 'An internal error occurred.'
+    dev_message = str(cause)
+    data = {'originalTraceback': _get_traceback(cause)}
+
+    try:
+        terminate(5.0)
+    except Exception as termination_error:
+        message += ' A further error occurred when attempting to terminate the model in response to the first error.'
+        dev_message = 'Original error: ' + dev_message + '\nTermination error: ' + str(termination_error)
+        data['terminationTraceback'] = _get_traceback(termination_error)
+
+    _fail_with_exception(message, dev_message, data)
+
+    return make_response(_get_root(), 500)

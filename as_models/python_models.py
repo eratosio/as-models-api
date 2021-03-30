@@ -18,7 +18,7 @@ from .util import resolve_service_config
 
 
 RETRY_STRATEGY = KongRetry(
-    total=5,
+    total=20,
     status_forcelist=[429, 500, 502, 503, 504],
     method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'POST'],
     backoff_factor=0.5
