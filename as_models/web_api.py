@@ -29,7 +29,10 @@ _SENTINEL = Sentinel()
 _ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
 
 
-def _signalterm_handler(signal, stack):
+logging.captureWarnings(True)
+
+
+def _signalterm_handler(signum, stack):
     exit(0)
 
 

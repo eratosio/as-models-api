@@ -18,10 +18,10 @@ from .util import resolve_service_config
 
 
 RETRY_STRATEGY = KongRetry(
-    total=20,
+    total=9,
     status_forcelist=[429, 500, 502, 503, 504],
-    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'POST'],
-    backoff_factor=0.5
+    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+    backoff_factor=1
 )
 HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
 
@@ -135,26 +135,28 @@ class DocumentPort(PythonPort):
 
     @property
     def value(self):
-        if self.__value is None:
-            try:
-                # For backwards compatibility, check if the document value is specified directly in the binding.
-                self.__value = self._binding['document']
-            except KeyError:
-                # Otherwise, load the document by its ID.
-                self.__value = self._context.analysis_client.get_document_value(self.document_id)
+        if self.__value is not None:
+            return self.__value
+
+        try:
+            # For backwards compatibility, check if the document value is specified directly in the binding.
+            self.__value = self._binding['document']
+        except KeyError:
+            # Otherwise, load the document by its ID.
+            self.__value = self.download(None)
 
         return self.__value
 
     @value.setter
     def value(self, value):
         if value != self.__value:
-            self.__value = value
-
             if self.was_supplied:
                 self._context.analysis_client.set_document_value(self.__get_document(), value=value)
 
+            self.__value = value
+
     def download(self, path):
-        self._context.analysis_client.get_document_value(self.document_id, path=path)
+        return self._context.analysis_client.get_document_value(self.document_id, path=path)
 
     def upload(self, path):
         self._context.analysis_client.set_document_value(self.__get_document(), path=path)
