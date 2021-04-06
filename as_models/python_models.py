@@ -1,21 +1,36 @@
 
-from .context import BaseContext
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT
-from . import models
-from .util import resolve_service_config, urlparse
+import importlib
+import os
+import sys
 
+from requests.adapters import HTTPAdapter
 from senaps_sensor.api import API
-
 from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
 from tds_client.util import urls
 
-import importlib, os, sys
+from . import models
+from .context import BaseContext
+from .kong_support import KongRetry
+from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
+                    DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
+from .util import resolve_service_config
+
+
+RETRY_STRATEGY = KongRetry(
+    total=9,
+    status_forcelist=[429, 500, 502, 503, 504],
+    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+    backoff_factor=1
+)
+HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
+
 
 def is_valid_entrypoint(entrypoint):
     entrypoint = os.path.abspath(entrypoint)
 
     return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.py')
+
 
 def run_model(entrypoint, manifest, job_request, args, updater):
     model_id = job_request['modelId']
@@ -33,11 +48,13 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     except KeyError:
         implementation = getattr(module, model_id, None)
     if not callable(implementation):
-        raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint)) # TODO: more specific exception type?
+        # TODO: more specific exception type here?
+        raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint))
 
     # Run the callable.
-    updater.update() # Marks the job as running.
+    updater.update()  # Marks the job as running.
     implementation(Context(model, job_request, args, updater))
+
 
 def session_for_auth(auth, verify=None):
     from requests import Session
@@ -46,10 +63,15 @@ def session_for_auth(auth, verify=None):
     session.verify = verify
     session.auth = auth
 
+    session.mount('http://', HTTP_ADAPTER)
+    session.mount('https://', HTTP_ADAPTER)
+
     return session
+
 
 def urlpath(url):
     return urls.urlparse(url).path
+
 
 class PythonPort(object):
     def __init__(self, context, port, binding):
@@ -78,6 +100,7 @@ class PythonPort(object):
     def _context(self):
         return self.__context
 
+
 class StreamPort(PythonPort):
     def get(self, default=None):
         return self.stream_id if self.was_supplied else default
@@ -85,6 +108,7 @@ class StreamPort(PythonPort):
     @property
     def stream_id(self):
         return self._binding.get('streamId')
+
 
 class MultistreamPort(PythonPort):
     def get(self, default=None):
@@ -94,29 +118,54 @@ class MultistreamPort(PythonPort):
     def stream_ids(self):
         return self._binding.get('streamIds')
 
+
 class DocumentPort(PythonPort):
+    def __init__(self, context, port, binding):
+        super(DocumentPort, self).__init__(context, port, binding)
+
+        self.__document = None
+        self.__value = None
+
     def get(self, default=None):
         return self.value if self.was_supplied else default
 
     @property
     def document_id(self):
-        return self._binding.get('documentId')
+        return self._binding.get('documentId') if self._binding else None
 
     @property
     def value(self):
-        return self._binding.get('document')
+        if self.__value is not None:
+            return self.__value
+
+        try:
+            # For backwards compatibility, check if the document value is specified directly in the binding.
+            self.__value = self._binding['document']
+        except KeyError:
+            # Otherwise, load the document by its ID.
+            self.__value = self.download(None)
+
+        return self.__value
 
     @value.setter
     def value(self, value):
-        if value != self.value:
-            self._binding['document'] = value
+        if value != self.__value:
+            if self.was_supplied:
+                self._context.analysis_client.set_document_value(self.__get_document(), value=value)
 
-            mod_doc = {'documentId': self.document_id, 'document': self.value}
+            self.__value = value
 
-            if getattr(self, 'index', None) is not None:
-                mod_doc['index'] = self.index
+    def download(self, path):
+        return self._context.analysis_client.get_document_value(self.document_id, path=path)
 
-            self._context.update(modified_documents={ self.name: mod_doc })
+    def upload(self, path):
+        self._context.analysis_client.set_document_value(self.__get_document(), path=path)
+
+    def __get_document(self):
+        if self.__document is None:
+            self.__document = self._context.analysis_client.get_document(self.document_id)
+        return self.__document
+
 
 class GridPort(PythonPort):
     def __init__(self, context, port, binding):
@@ -171,6 +220,7 @@ class GridPort(PythonPort):
     def dataset_path(self):
         return self._binding.get('dataset')
 
+
 class CollectionPort(PythonPort):
     def __init__(self, context, port, binding, ports):
         super(CollectionPort, self).__init__(context, port, binding)
@@ -197,6 +247,7 @@ class CollectionPort(PythonPort):
 
     def __repr__(self):
         return repr(self.get())
+
 
 class _SCApiProxy(API):
     def __init__(self, context, auth, host, api_root, verify=None):
@@ -229,6 +280,7 @@ class SenapsSearchStrategy(QuickSearchStrategy):
             catalogs.insert(0, Catalog(catalog_url, org_catalog.client))
 
         return catalogs
+
 
 class Context(BaseContext):
     _port_type_map = {
@@ -275,7 +327,7 @@ class Context(BaseContext):
 
         self._sensor_client = self._analysis_client = self._thredds_client = self._thredds_upload_client = None
 
-    def update(self, *args, **kwargs): # TODO: fix method signature
+    def update(self, *args, **kwargs):  # TODO: fix method signature
         self._updater.update(*args, **kwargs)
 
     @property
