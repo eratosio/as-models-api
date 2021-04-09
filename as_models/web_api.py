@@ -1,23 +1,40 @@
 
 from __future__ import print_function
 
-from .ports import STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, \
-    INPUT_PORT
+import copy
+import datetime
+import json
+import logging
+import multiprocessing
+import os
+import signal
+import sys
+import time
+import traceback
+from flask import Flask, jsonify, make_response, request
+import warnings
+
+from werkzeug.exceptions import InternalServerError
+
+from . import log_levels, python_models, r_models
+from .exceptions import SenapsModelError
+from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
 from .sentinel import Sentinel
-from .manifest import Manifest
-from .exceptions import SenapsModelError
+from .stats import get_peak_memory_usage
 from .util import sanitize_dict_for_json
-from . import log_levels, python_models, r_models
-
-import copy
-import datetime, json, logging, multiprocessing, os, signal, sys, time, traceback
-from flask import Flask, jsonify, make_response, request
+from .version import __version__
 
 _SENTINEL = Sentinel()
+_ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
 
-def _signalterm_handler(signal, stack):
+
+logging.captureWarnings(True)
+
+
+def _signalterm_handler(signum, stack):
     exit(0)
+
 
 def _determine_runtime_type(entrypoint, args):
     try:
@@ -28,31 +45,26 @@ def _determine_runtime_type(entrypoint, args):
         elif r_models.is_valid_entrypoint(entrypoint):
             return 'r'
 
+
 class _Updater(object):
     def __init__(self, sender):
         self._sender = sender
 
         self._state = {}
-        self._modified_streams = set()
-        self._modified_documents = {}
 
     def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
-        update = { k:v for k,v in {
+        if modified_streams:
+            warnings.warn('Usage of modified_streams argument is deprecated and will be removed in a future version',
+                          DeprecationWarning)
+        if modified_documents:
+            warnings.warn('Usage of modified_documents argument is deprecated and will be removed in a future version',
+                          DeprecationWarning)
+
+        update = {k: v for k, v in {
             'state': RUNNING,
             'message': message,
             'progress': progress
-        }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL)) }
-
-        self._modified_streams.update(modified_streams)
-
-        for port_name, mod_doc in modified_documents.items():
-            if type(mod_doc) != str and 'index' in mod_doc:
-                # must be a collection update...
-                if port_name not in self._modified_documents:
-                    self._modified_documents[port_name] = []
-                self._modified_documents[port_name].append(mod_doc)
-            else:
-                self._modified_documents[port_name] = mod_doc
+        }.items() if v not in (_SENTINEL, self._state.get(k, _SENTINEL))}
 
         if update:
             self._state.update(update)
@@ -60,7 +72,8 @@ class _Updater(object):
 
     def log(self, message, level=None, file=None, line=None, timestamp=None, logger=None):
         if level is not None and level not in log_levels.LEVELS:
-            raise ValueError('Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
+            raise ValueError(
+                'Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
 
         message = message.rstrip() if message else None
 
@@ -79,7 +92,8 @@ class _Updater(object):
             'logger': logger
         }
 
-        self._sender.send({ 'log': [ log_entry ] })
+        self._sender.send({'log': [log_entry]})
+
 
 class _JobProcessLogHandler(logging.Handler):
     def __init__(self, updater):
@@ -94,9 +108,11 @@ class _JobProcessLogHandler(logging.Handler):
             level=log_levels.from_stdlib_levelno(record.levelno),
             file=record.filename or None,
             line=record.lineno,
-            timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+            timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
+                int(record.msecs) % 1000),
             logger=record.name
         )
+
 
 class StreamRedirect(object):
     def __init__(self, original_stream, updater, log_level):
@@ -110,6 +126,7 @@ class StreamRedirect(object):
 
     def flush(self):
         self._original_stream.flush()
+
 
 class _JobProcess(object):
     def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger):
@@ -134,7 +151,7 @@ class _JobProcess(object):
         developer_msg = ''
         if tb is not None:
             # it should only be able to be None if another exception is raised on this thread
-            # or someone invoked exc_clear prior to use consuming it.
+            # or someone invoked exc_clear prior to us consuming it.
             developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         msg = exc.msg if type(exc) == SenapsModelError else str(exc)
@@ -149,7 +166,7 @@ class _JobProcess(object):
         })
 
     def __call__(self):
-        model_id = None     # pre-declare this so the name exists later if an exception occurs.
+        model_id = None  # pre-declare this so the name exists later if an exception occurs.
         signal.signal(signal.SIGTERM, _signalterm_handler)
 
         updater = _Updater(self._sender)
@@ -177,51 +194,9 @@ class _JobProcess(object):
             _model_complete.value = 1
             logger.debug('Implementation method for model %s returned.', model_id)
 
-            # Update ports (generate "results").
-            # TODO: this could probably be neater.
-            mod_streams, mod_docs = updater._modified_streams, updater._modified_documents
-            results = {}
-
-            bindings = self._job_request['ports']
-
-            for port in self._manifest.models[model_id].ports:
-                # only write results for output ports...
-                if port.direction == INPUT_PORT:
-                    continue
-
-                try:
-                    binding = bindings[port.name]
-                except KeyError:
-                    continue
-
-                if port.type == STREAM_PORT and binding.get('streamId') in mod_streams:
-                    results[port.name] = {'type': port.type}
-                elif port.type == MULTISTREAM_PORT and not mod_streams.isdisjoint(binding.get('streamIds', [])):
-                    results[port.name] = {'type': port.type, 'outdatedStreams': list(
-                    mod_streams.intersection(binding.get('streamIds', [])))}
-                elif port.type == DOCUMENT_PORT and port.name in mod_docs:
-                    document_update = mod_docs[port.name]
-                    document_update['type'] = port.type
-
-                    if 'documentId' not in document_update and 'documentId' in binding:
-                        document_update['documentId'] = binding.get('documentId')
-
-                    results[port.name] = document_update
-
-                elif port.type == DOCUMENT_COLLECTION_PORT and port.name in mod_docs:
-                    inner_documents = mod_docs[port.name]
-                    inner_bindings = binding.get('ports')
-
-                    for document_update in inner_documents:
-                        if 'documentId' not in document_update and 'index' in document_update:
-                            document_update['documentId'] = inner_bindings[document_update['index']].get('documentId')
-
-                    results[port.name] = {'type': port.type, 'ports': inner_documents}
-
             self._sender.send({
                 'state': COMPLETE,
-                'progress': 1.0,
-                'results': results
+                'progress': 1.0
             })
         except BaseException as e:
             logger.critical('Model failed with exception: %s', e)
@@ -243,16 +218,18 @@ class _WebAPILogHandler(logging.Handler):
             'level': log_levels.from_stdlib_levelno(record.levelno),
             'file': record.filename or None,
             'lineNumber': record.lineno,
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(int(record.msecs)%1000),
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
+                int(record.msecs) % 1000),
             'logger': record.name
         })
 
+
 app = Flask(__name__)
 
-_process = _receiver = _state = _model_complete = _root_logger = _logger = None
+_process = _receiver = _state = _model_complete = _root_logger = _logger = _model_id = _failed_timestamp = None
+
 
 def _reset():
-
     global _process, _receiver, _state, _model_complete, _root_logger, _logger
 
     _process = _receiver = None
@@ -268,8 +245,8 @@ def _reset():
 
 _reset()
 
-
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
+
 
 def _load_entrypoint(path):
     path = os.path.abspath(path)
@@ -294,14 +271,18 @@ def _load_entrypoint(path):
 
 
 def _get_state():
-    if (None not in (_process, _receiver)) and (_state.get('state', None) in (None, PENDING, RUNNING)):
+    state = _state.get('state', None)
+
+    if (None not in (_process, _receiver)) and (state in (None, PENDING, RUNNING)):
         try:
             while _receiver.poll():
                 update = _receiver.recv()
                 _state.setdefault('log', []).extend(update.pop('log', []))
                 _state.update(update)
         except EOFError as e:
-            print(e) # TODO: handle better
+            print(e)  # TODO: handle better
+
+    _check_for_abnormal_termination()
 
     ret_val = copy.deepcopy(_state)
     # CPS-952: purge old log messages.
@@ -312,56 +293,127 @@ def _get_state():
             # allows us to avoid clobbering incoming messages while we work.
             del _state['log'][0]
 
+    ret_val['api_version'] = __version__
+
+    if (_process is not None) and _process.is_alive():
+        try:
+            ret_val['stats'] = {
+                'peakMemoryUsage': get_peak_memory_usage(_process.pid)
+            }
+        except Exception:
+            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
+
     return ret_val
 
 
-def _handle_failed_child_process(sender):
-    while _process is not None and _process.is_alive():
-        # Attempt to reap an exited child process.
-        try:
-            pid, exit_code = os.waitpid(-1, os.WNOHANG)
-        except OSError:
-            break
+def _check_for_abnormal_termination():
+    global _failed_timestamp, _process, _state
 
-        # If the child process is the model process and it hasn't completed
-        # properly, flag a failure.
-        if (pid == _process.pid) and not _model_complete.value:
-            sender.send({
-                'state': FAILED,
-                'message': 'Model process terminated abnormally with exit code {}.'.format(exit_code)
-            })
-        elif pid == 0:
-            break
+    # Don't bother continuing if the model process hasn't started yet, is still running, or has already been marked
+    # finished.
+    if _process is None or _process.is_alive() or _state.get('state') in (COMPLETE, FAILED, TERMINATED):
+        return
+
+    # Record the time at which the model process is first detected to have failed.
+    if _failed_timestamp is None:
+        _failed_timestamp = time.time()
+
+    # Allow up to _ABNORMAL_TERMINATION_GRACE_PERIOD seconds for any pending messages from the model to come through the
+    # IPC pipe.
+    if (time.time() - _failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD:
+        return
+
+    # At this point, the model must have terminated abnormally and the grace period elapsed. Attempt to clean up the
+    # defunct process.
+    _logger.critical('Model process has terminated abnormally. Waiting {} seconds for process cleanup.'.format(
+        _ABNORMAL_TERMINATION_GRACE_PERIOD
+    ))
+    _process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
+
+    if _process.exitcode is None:
+        _logger.error('Failed to clean up model process.')
+    elif _process.exitcode < 0:
+        _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
+
+    _fail_with_exception(
+        'Model "{}" terminated abnormally.'.format(_model_id),
+        'Model "{}" terminated with exit code {}.'.format(_model_id, _process.exitcode),
+        {
+            'exitCode': _process.exitcode
+        }
+    )
+
+
+def _fail_with_exception(message, dev_message, data):
+    _state['state'] = FAILED
+    _state['exception'] = {
+        'developer_msg': dev_message,
+        'msg': message,
+        'data': sanitize_dict_for_json(data),
+        'model_id': _model_id
+    }
+
+
+def terminate(timeout=0.0):
+    _logger.debug('Waiting %.2f seconds for model to terminate.', timeout)
+
+    _process.terminate()
+    _process.join(timeout)
+
+    if _process.is_alive():
+        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
+        os.kill(_process.pid, signal.SIGKILL)
+    else:
+        _logger.debug('Model shut down cleanly.')
+
+    if _state['state'] not in (COMPLETE, FAILED):
+        _state['state'] = TERMINATED
+
+    # Make best-effort attempt to stop the web API.
+    func = request.environ.get('werkzeug.server.shutdown')
+    if callable(func):
+        func()
+    else:
+        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+
+
+def _get_traceback(exc):
+    try:
+        return ''.join(traceback.format_tb(exc.__traceback__))
+    except AttributeError:
+        pass
 
 
 @app.route('/', methods=['GET'])
 def _get_root():
     return jsonify(_get_state())
 
+
 @app.route('/', methods=['POST'])
 def _post_root():
-    global _process, _receiver
+    global _process, _receiver, _model_id
 
     if _process is not None and _process.is_alive():
-        return make_response(jsonify({ 'error': 'Cannot submit new job - job already running.' }), 409)
+        return make_response(jsonify({'error': 'Cannot submit new job - job already running.'}), 409)
 
     _reset()
 
     job_request = request.get_json(force=True, silent=True) or {}
 
     try:
-        model_id = job_request['modelId']
+        _model_id = job_request['modelId']
     except KeyError:
         return make_response(jsonify({'error': 'Required property "modelId" is missing.'}), 400)
 
     manifest, entrypoint = _load_entrypoint(app.config['model_path'])
 
     try:
-        model = manifest.models[model_id]
+        model = manifest.models[_model_id]
     except KeyError:
-        return make_response(jsonify({'error': 'Unknown model "{}".'.format(model_id)}), 500)
+        return make_response(jsonify({'error': 'Unknown model "{}".'.format(_model_id)}), 500)
 
-    missing_ports = [port.name for port in model.ports if port.required and (port.name not in job_request.get('ports', {}))]
+    missing_ports = [port.name for port in model.ports if
+                     port.required and (port.name not in job_request.get('ports', {}))]
 
     if missing_ports:
         _logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
@@ -372,40 +424,46 @@ def _post_root():
     _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
 
     _receiver, sender = multiprocessing.Pipe(False)
+    job_process = _JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger)
 
-    #CS: Dsiabling for now to test graincast workflows.
-    # signal.signal(signal.SIGCHLD, lambda sig, frame: _handle_failed_child_process(sender))
+    try:
+        with multiprocessing.get_context('spawn') as mp:
+            _process = mp.Process(target=job_process)
+    except (AttributeError, ValueError):
+        # AttributeError if running pre-3.4 Python (and get_context() is therefore unavailable); ValueError if "spawn"
+        # is unsupported.
+        _process = multiprocessing.Process(target=job_process)
 
-    _process = multiprocessing.Process(target=_JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger))
     _process.start()
 
-
     return _get_root()
+
 
 @app.route('/terminate', methods=['POST'])
 def _post_terminate():
     args = request.get_json(force=True, silent=True) or {}
     timeout = args.get('timeout', 0.0)
 
-    _logger.info('Received terminate message. Waiting %.2f seconds for model to terminate.', timeout)
-
-    _process.terminate()
-    _process.join(timeout)
-
-    if _process.is_alive():
-        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
-        os.kill(_process.pid, signal.SIGKILL)
-    else:
-        _logger.info('Model shut down cleanly.')
-
-    if _state['state'] not in (COMPLETE, FAILED):
-        _state['state'] = TERMINATED
-
-    # Make best-effort attempt the web API.
-    func = request.environ.get('werkzeug.server.shutdown')
-    if callable(func):
-        func()
-    else:
-        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+    terminate(timeout)
 
     return _get_root()
+
+
+@app.errorhandler(InternalServerError)
+def handle_500(e):
+    cause = getattr(e, "original_exception", e)
+
+    message = 'An internal error occurred.'
+    dev_message = str(cause)
+    data = {'originalTraceback': _get_traceback(cause)}
+
+    try:
+        terminate(5.0)
+    except Exception as termination_error:
+        message += ' A further error occurred when attempting to terminate the model in response to the first error.'
+        dev_message = 'Original error: ' + dev_message + '\nTermination error: ' + str(termination_error)
+        data['terminationTraceback'] = _get_traceback(termination_error)
+
+    _fail_with_exception(message, dev_message, data)
+
+    return make_response(_get_root(), 500)
