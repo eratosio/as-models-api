@@ -11,13 +11,13 @@ from tds_client.util import urls
 
 from . import models
 from .context import BaseContext
-from .kong_support import KongRetry
+from .api_support import Retry
 from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
                     DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
 from .util import resolve_service_config
 
 
-RETRY_STRATEGY = KongRetry(
+RETRY_STRATEGY = Retry(
     total=9,
     status_forcelist=[429, 500, 502, 503, 504],
     method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
