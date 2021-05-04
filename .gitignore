@@ -12,5 +12,7 @@
 /htmlcov
 
 .idea
+.venv
 venv
 venv27
+

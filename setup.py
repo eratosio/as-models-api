@@ -17,13 +17,13 @@ setup(
     version=get_version('as_models/version.py'),
     author='Mac Coombe',
     author_email='mac.coombe@csiro.au',
-    description=('Analysis Services model integration library.'),
+    description='Analysis Services model integration library.',
     keywords='models',
     # TODO: url = 'https://bitbucket.csiro.au/...',
     packages=find_packages(),
     long_description=read('readme.md'),
     install_requires=[
-        'flask'
+        'flask==1.1.2'
     ],
     test_requires=[
         'httpretty==1.0.5',
