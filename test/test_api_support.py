@@ -1,5 +1,6 @@
 
-from as_models.api_support import ANY, retry, Retry
+from as_models.api_support import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
+from datetime import datetime, timedelta
 import json
 import httpretty
 import requests
@@ -23,7 +24,6 @@ def _webob_raise_for_status(response):
 class MockJsonResource:
     def __init__(self, url, responses_=None):
         self._url = url
-        self._requests = 0
         self._responses = [] if responses_ is None else responses_
 
         httpretty.register_uri(httpretty.GET, url, body=self)
@@ -38,12 +38,10 @@ class MockJsonResource:
 
     @property
     def request_count(self):
-        return self._requests
+        return len(httpretty.latest_requests())
 
     def __call__(self, request, uri, response_headers):
-        self._requests += 1
-        response = self._responses[self._requests - 1]
-        return response
+        return self._responses[self.request_count - 1]
 
 
 class ApiSupportTests(unittest.TestCase):
@@ -124,4 +122,31 @@ class ApiSupportTests(unittest.TestCase):
         response = make_request()
         self.assertEqual(expected_status, response.status_code)
         self.assertEqual(expected_body, json.loads(response.text))
+        self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_parsing_timestamp_based_retry_header(self):
+        # Request no retries until three seconds from now.
+        now = datetime.now(GMT)
+        retry_after = (now + timedelta(seconds=3)).replace(microsecond=0)
+        header_value = retry_after.strftime(RFC_7231_TIMESTAMP_FORMAT)
+
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(429, {'Retry-After': header_value}, {'status': 'rate limited'})
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        @retry
+        def make_request():
+            response_ = requests.get(resource.url)
+            response_.raise_for_status()
+            return response_
+
+        response = make_request()
+
+        # Current time MUST be after the retry_after timestamp.
+        now = datetime.now(GMT)
+        self.assertTrue(now >= retry_after)
+
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, response.json())
         self.assertEqual(2, resource.request_count)

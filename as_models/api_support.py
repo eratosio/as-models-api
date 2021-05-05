@@ -3,10 +3,15 @@
 Support routines for interacting with Senaps APIs.
 """
 
+from datetime import datetime, timedelta, timezone
 import functools
 import logging
 from requests.packages.urllib3.util.retry import Retry as _Retry
 import time
+
+
+GMT = timezone(timedelta(seconds=0), 'GMT')
+RFC_7231_TIMESTAMP_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
 
 # Default retry parameters.
 RETRIES = 10
@@ -54,6 +59,27 @@ def _is_retryable_value(value, retryable_values):
     return (retryable_values is ANY) or (value in retryable_values)
 
 
+def _parse_retry_delay_header(delay):
+    # Potential format #1 is just the number of seconds to wait.
+    try:
+        return float(delay)
+    except ValueError:
+        pass
+
+    # Potential format #2 is a timestamp (in RFC 7231 § 7.1.1.2 format) to wait until.
+    try:
+        timestamp = datetime.strptime(delay, RFC_7231_TIMESTAMP_FORMAT)
+    except ValueError:
+        raise ValueError('Unable to parse delay header value {}'.format(delay))
+
+    # Timestamp is in GMT (according to the standard), but strptime silently discards the timezone information. We need
+    # to add it back in.
+    timestamp = timestamp.replace(tzinfo=GMT)
+
+    # If using the timestamp-based format, return number of seconds until timeout is elapsed.
+    return (timestamp - datetime.now(GMT)).total_seconds()
+
+
 def backoff_from_headers(headers):
     """
     Given a mapping containing HTTP response headers, attempt to determine an appropriate retry backoff period.
@@ -72,7 +98,7 @@ def backoff_from_headers(headers):
     # First try using Retry-After or RateLimit-Reset headers.
     for header in ['retry-after', 'ratelimit-reset']:
         if header in headers:
-            return float(headers[header])  # TODO: handle date-based retry-after (see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Retry-After)
+            return max(0.0, _parse_retry_delay_header(headers[header]))
 
     # Otherwise, try to find a Kong X-RateLimit-Remaining header that is at zero.
     for header, backoff in _X_RATE_LIMIT_BACKOFFS:
@@ -172,9 +198,9 @@ class Retry(_Retry):
         self.__backoff_time = kwargs.pop('backoff_time', None)
         super(Retry, self).__init__(*args, **kwargs)
 
-    def new(self, *args, **kwargs):
+    def new(self, **kwargs):
         kwargs['backoff_time'] = self.__backoff_time
-        return super(Retry, self).new(*args, **kwargs)
+        return super(Retry, self).new(**kwargs)
 
     def increment(self, method=None, url=None, response=None, error=None, _pool=None, _stacktrace=None):
         if response and (response.status == 429):
