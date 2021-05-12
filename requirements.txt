@@ -1,7 +1,7 @@
-git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git#egg=senaps_sensor
-git+https://bitbucket.csiro.au/scm/sc/tds-client-python.git#egg=tds_client
-git+https://bitbucket.csiro.au/scm/sc/tdm-client-python.git#egg=tdm
-git+https://bitbucket.csiro.au/scm/sc/as-client-python.git#egg=as_client
-flask
-enum34
-requests
+git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git@v2.12.0#egg=senaps_sensor
+git+https://bitbucket.csiro.au/scm/sc/tds-client-python.git@v1.1.2#egg=tds_client
+git+https://bitbucket.csiro.au/scm/sc/tdm-client-python.git@v2.31.2#egg=tdm
+git+https://bitbucket.csiro.au/scm/sc/as-client-python.git@v2.20.0#egg=as_client
+flask==1.1.2
+enum34==1.1.10
+requests==2.25.1
