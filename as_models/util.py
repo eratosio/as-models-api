@@ -1,7 +1,6 @@
 # -*- coding: UTF-8 -*-
 import datetime
 import json
-import sys
 
 from .constants import MAX_ERR_DATA_LEN
 from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
@@ -58,6 +57,7 @@ def dump_to_json(token):
     except Exception:
         # that was unexpected, guess it is not serializable either...
         return 'error, cannot serialise field, unexpected exception.'
+
 
 def sanitize_dict_for_json(mapping):
     """
