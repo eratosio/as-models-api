@@ -1,0 +1,2 @@
+[*.{das, dds, dods}]
+trim_trailing_whitespace = false

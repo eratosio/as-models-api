@@ -1,5 +1,5 @@
 
-from as_models.api_support import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
+from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
 from datetime import datetime, timedelta
 import json
 import httpretty
@@ -44,7 +44,7 @@ class MockJsonResource:
         return self._responses[self.request_count - 1]
 
 
-class ApiSupportTests(unittest.TestCase):
+class RetriesTests(unittest.TestCase):
     RETRY_STRATEGY = Retry(
         total=9,
         status_forcelist=[429, 500, 502, 503, 504],
@@ -98,7 +98,7 @@ class ApiSupportTests(unittest.TestCase):
         expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
 
         session = requests.Session()
-        session.mount('http://', ApiSupportTests.HTTP_ADAPTER)
+        session.mount('http://', RetriesTests.HTTP_ADAPTER)
 
         response = session.get(resource.url)
 

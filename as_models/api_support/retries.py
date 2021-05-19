@@ -1,16 +1,24 @@
+# coding=utf-8
 
-"""
-Support routines for interacting with Senaps APIs.
-"""
-
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
 from requests.packages.urllib3.util.retry import Retry as _Retry
 import time
 
 
-GMT = timezone(timedelta(seconds=0), 'GMT')
+class _GMT(tzinfo):
+    def tzname(self, dt):
+        return 'GMT'
+
+    def utcoffset(self, dt):
+        return timedelta()
+
+    def dst(self, dt):
+        return timedelta()
+
+
+GMT = _GMT()
 RFC_7231_TIMESTAMP_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
 
 # Default retry parameters.
@@ -118,12 +126,12 @@ class _Retryable(object):
         self._retryable_methods = retryable_methods
         self._retryable_statuses = retryable_statuses
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, instance, *args, **kwargs):
         retries = self._retries
 
         while True:
             try:
-                return self.fn(*args, **kwargs)
+                return self.fn(instance, *args, **kwargs)
             except Exception as e:
                 # If we're outta retries, give up now.
                 if retries <= 0:
@@ -133,6 +141,9 @@ class _Retryable(object):
                 retries -= 1
                 if not self._back_off(e):
                     raise
+
+    def __get__(self, instance, owner):
+        return functools.partial(self, instance)
 
     def _back_off(self, exception):
         for cls, extractor in _metadata_extractors:
