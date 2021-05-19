@@ -11,7 +11,6 @@ NOTES:
       be making HEAD and GET requests anyway.
 """
 
-
 from .retries import ANY, retry
 
 import numpy as np
@@ -109,42 +108,3 @@ class PydapDataStore(AbstractDataStore):
     @retry(retryable_methods=ANY)
     def get_dimensions(self):
         return Frozen(self.ds.dimensions)
-
-
-'''try:
-    from xarray.backends.store import StoreBackendEntrypoint
-    from xarray.backends.common import BackendEntrypoint, BACKEND_ENTRYPOINTS
-    from xarray.core.utils import close_on_error, is_remote_uri
-
-    import warnings
-
-    class PydapBackendEntrypoint(BackendEntrypoint):
-        def guess_can_open(self, filename_or_obj):
-            return isinstance(filename_or_obj, PydapDataStore) or (
-                    isinstance(filename_or_obj, str) and is_remote_uri(filename_or_obj)
-            )
-
-        def open_dataset(self, filename_or_obj, mask_and_scale=True, decode_times=True, concat_characters=True,
-                         decode_coords=True, drop_variables=None, use_cftime=None, decode_timedelta=None, session=None,
-                         lock=None):
-            if lock is not None:
-                warnings.warn("The kwarg 'lock' has been deprecated for this backend, and is now ignored. In the "
-                              "future passing lock will raise an error.", DeprecationWarning)
-
-            if isinstance(filename_or_obj, PydapDataStore):
-                store = filename_or_obj
-            elif isinstance(filename_or_obj, str):
-                store = PydapDataStore.open(filename_or_obj, session=session)
-            else:
-                raise ValueError('Unable to open {}')
-
-            store_entrypoint = StoreBackendEntrypoint()
-            with close_on_error(store):
-                return store_entrypoint.open_dataset(store, mask_and_scale=mask_and_scale, decode_times=decode_times,
-                                                     concat_characters=concat_characters, decode_coords=decode_coords,
-                                                     drop_variables=drop_variables, use_cftime=use_cftime,
-                                                     decode_timedelta=decode_timedelta)
-
-    BACKEND_ENTRYPOINTS["pydap_with_retries"] = PydapBackendEntrypoint
-except ImportError:
-    pass  # We must be running an older version of xarray.'''
