@@ -62,7 +62,7 @@ class MockOpenDAPResource(object):
 
 class RetriesTests(unittest.TestCase):
     @httpretty.activate
-    def test_xarray_over_opendap_with_server_failure(self):
+    def test_xarray_over_opendap_with_rate_limiting(self):
         url = 'http://senaps.io/thredds/dodsC/mock.nc'
         resource = MockOpenDAPResource(url, 'mock.nc')
 
@@ -74,7 +74,31 @@ class RetriesTests(unittest.TestCase):
         self.assertEqual(0, resource.retried_request_count)
 
         # Set up the mock OpenDAP resource to return a rate limit response on the next request.
-        resource.add_retry_response(500, {'Retry-After': '1'}, {'status': 'rate limited'})
+        resource.add_retry_response(429, {'Retry-After': '1'}, {'status': 'rate limited'})
+
+        # Use xarray to get the dataset data. This should cause further requests, including the one that is retried.
+        dataset = xr.open_dataset(data_store, decode_cf=False)
+        print(dataset.data[:])
+
+        # Double-check that new requests were actually made.
+        self.assertGreater(resource.request_count, request_count)
+        self.assertEqual(1, resource.retried_request_count)
+
+    @httpretty.activate
+    def test_xarray_over_opendap_with_server_error(self):
+        url = 'http://senaps.io/thredds/dodsC/mock.nc'
+        resource = MockOpenDAPResource(url, 'mock.nc')
+
+        # Initially opening the dataset with PyDAP will cause a couple of requests.
+        ds = pydap.client.open_url(url)
+        request_count = resource.request_count
+        data_store = PydapDataStore(ds)
+        self.assertGreater(request_count, 0)
+        self.assertEqual(0, resource.retried_request_count)
+
+        # Set up the mock OpenDAP resource to return a server error. Note that no rate-limiting headers are present, so
+        # the default exponential backoff should occur.
+        resource.add_retry_response(500, {}, {'status': 'server error'})
 
         # Use xarray to get the dataset data. This should cause further requests, including the one that is retried.
         dataset = xr.open_dataset(data_store, decode_cf=False)
