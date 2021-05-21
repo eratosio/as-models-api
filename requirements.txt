@@ -4,4 +4,4 @@ git+https://bitbucket.csiro.au/scm/sc/tdm-client-python.git@v2.31.2#egg=tdm
 git+https://bitbucket.csiro.au/scm/sc/as-client-python.git@v2.20.0#egg=as_client
 flask==1.1.2
 enum34==1.1.10
-requests==2.25.1
+requests>=2.22.0,<3.0.0
