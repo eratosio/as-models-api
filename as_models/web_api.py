@@ -355,6 +355,9 @@ def _fail_with_exception(message, dev_message, data):
 
 
 def terminate(timeout=0.0):
+    if _process is None:
+        return  # Can't terminate model - it never started.
+
     _logger.debug('Waiting %.2f seconds for model to terminate.', timeout)
 
     _process.terminate()

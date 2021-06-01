@@ -1,0 +1,9 @@
+# Prevent editors accidentally stripping significant whitespace from mock OpenDAP response files (particularly the dods
+# files).
+[*.{das, dds, dods}]
+trim_trailing_whitespace = false
+
+# Python coding style.
+[*.py]
+indent_style = space
+indent_size = 4

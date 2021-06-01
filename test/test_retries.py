@@ -1,5 +1,5 @@
 
-from as_models.api_support import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
+from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
 from datetime import datetime, timedelta
 import json
 import httpretty
@@ -44,7 +44,7 @@ class MockJsonResource:
         return self._responses[self.request_count - 1]
 
 
-class ApiSupportTests(unittest.TestCase):
+class RetriesTests(unittest.TestCase):
     RETRY_STRATEGY = Retry(
         total=9,
         status_forcelist=[429, 500, 502, 503, 504],
@@ -98,7 +98,7 @@ class ApiSupportTests(unittest.TestCase):
         expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
 
         session = requests.Session()
-        session.mount('http://', ApiSupportTests.HTTP_ADAPTER)
+        session.mount('http://', RetriesTests.HTTP_ADAPTER)
 
         response = session.get(resource.url)
 
@@ -110,6 +110,39 @@ class ApiSupportTests(unittest.TestCase):
     def test_decorator_with_webob(self):
         resource = MockJsonResource('http://senaps.io/api/test')
         resource.add_response(429, {'Retry-After': '1'}, {'status': 'rate limited'})
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        @retry(retryable_methods=ANY)  # NOTE: ANY required for WebOb, since request method is not retained.
+        def make_request():
+            response_ = Request.blank(resource.url).get_response()
+            response_.decode_content()
+            _webob_raise_for_status(response_)
+            return response_
+
+        response = make_request()
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, json.loads(response.text))
+        self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_http_adapter_when_server_error(self):
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(500, {}, {'status': 'server error'})
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        session = requests.Session()
+        session.mount('http://', RetriesTests.HTTP_ADAPTER)
+
+        response = session.get(resource.url)
+
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, response.json())
+        self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_server_error_with_webob(self):
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(500, {}, {'status': 'server error'})
         expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
 
         @retry(retryable_methods=ANY)  # NOTE: ANY required for WebOb, since request method is not retained.
