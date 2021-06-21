@@ -1,14 +1,16 @@
 # -*- coding: UTF-8 -*-
+
 import datetime
 import json
+import posixpath
 
 from .constants import MAX_ERR_DATA_LEN
 from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
 try:
-    import urlparse
+    import urlparse  # Python 2.7
 except ImportError:
-    import urllib.parse as urlparse
+    from urllib import parse as urlparse  # Python 3+
 
 
 def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, apiRoot=None, apiKey=None, verify=True):
@@ -77,3 +79,9 @@ def sanitize_dict_for_json(mapping):
         return {'error': 'json_serialisation_failed, user data larger than max of %s characters. Data preview: %s' % \
                (MAX_ERR_DATA_LEN, json_data[0:150])}
     return json.loads(json_data)
+
+
+def urljoin(base_url, *paths):
+    url_parts = list(urlparse.urlparse(base_url))
+    url_parts[2] = posixpath.join(url_parts[2], *paths)  # NOTE: url_parts[2] is path
+    return urlparse.urlunparse(url_parts)
