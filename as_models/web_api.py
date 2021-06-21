@@ -111,7 +111,7 @@ class _JobProcessLogHandler(logging.Handler):
             line=record.lineno,
             timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
                 int(record.msecs) % 1000),
-            logger=record.name
+            logger_=record.name
         )
 
 
@@ -192,7 +192,7 @@ class _JobProcess(object):
                 r_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
             else:
                 raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
-            _model_complete.value = 1
+            api_state.model_complete.value = 1
             process_logger.debug('Implementation method for model %s returned.', model_id)
 
             self._sender.send({
@@ -245,7 +245,7 @@ class ApiState(object):
         self.model_complete = multiprocessing.Value('i', 0)
 
         self._root_logger = logging.getLogger()
-        self._root_logger.addHandler(_WebAPILogHandler(api_state.state))
+        self._root_logger.addHandler(_WebAPILogHandler(self.state))
 
     def check_subprocess_startup_timeout(self):
         if self.subprocess_running:
@@ -353,6 +353,7 @@ def _get_state():
     ret_val['api_version'] = __version__
 
     if api_state.subprocess_running:
+        # noinspection PyBroadException
         try:
             ret_val['stats'] = {
                 'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
