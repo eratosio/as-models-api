@@ -26,6 +26,7 @@ from .util import sanitize_dict_for_json
 from .version import __version__
 
 _SENTINEL = Sentinel()
+_SUBPROCESS_STARTUP_TIME_LIMIT = 30.0  # seconds
 _ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
 
 
@@ -52,11 +53,11 @@ class _Updater(object):
 
         self._state = {}
 
-    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=[], modified_documents={}):
-        if modified_streams:
+    def update(self, message=_SENTINEL, progress=_SENTINEL, modified_streams=None, modified_documents=None):
+        if modified_streams is not None:
             warnings.warn('Usage of modified_streams argument is deprecated and will be removed in a future version',
                           DeprecationWarning)
-        if modified_documents:
+        if modified_documents is not None:
             warnings.warn('Usage of modified_documents argument is deprecated and will be removed in a future version',
                           DeprecationWarning)
 
@@ -70,7 +71,7 @@ class _Updater(object):
             self._state.update(update)
             self._sender.send(update)
 
-    def log(self, message, level=None, file=None, line=None, timestamp=None, logger=None):
+    def log(self, message, level=None, file=None, line=None, timestamp=None, logger_=None):
         if level is not None and level not in log_levels.LEVELS:
             raise ValueError(
                 'Unsupported log level "{}". Supported values: {}'.format(level, ', '.join(log_levels.LEVELS)))
@@ -89,7 +90,7 @@ class _Updater(object):
             'file': file,
             'lineNumber': line,
             'timestamp': timestamp,
-            'logger': logger
+            'logger': logger_
         }
 
         self._sender.send({'log': [log_entry]})
@@ -110,7 +111,7 @@ class _JobProcessLogHandler(logging.Handler):
             line=record.lineno,
             timestamp=time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(record.created)) + '.{:03}Z'.format(
                 int(record.msecs) % 1000),
-            logger=record.name
+            logger_=record.name
         )
 
 
@@ -129,14 +130,14 @@ class StreamRedirect(object):
 
 
 class _JobProcess(object):
-    def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger):
+    def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger_):
         self._entrypoint = entrypoint
         self._manifest = manifest
         self._runtime_type = runtime_type
         self._args = args
         self._job_request = job_request
         self._sender = sender
-        self._logger = logger
+        self._logger = logger_
 
     def __post_exception(self, exc, model_id):
         """
@@ -178,28 +179,28 @@ class _JobProcess(object):
         root_logger = logging.getLogger()
         root_logger.addHandler(_JobProcessLogHandler(updater))
         root_logger.setLevel(log_levels.to_stdlib_levelno(log_level))
-        logger = logging.getLogger('JobProcess')
+        process_logger = logging.getLogger('JobProcess')
 
         # Run the model!
         try:
             # TODO: see if the runtime can be made more dynamic
             model_id = self._job_request['modelId']
-            logger.debug('Calling implementation method for model %s...', model_id)
+            process_logger.debug('Calling implementation method for model %s...', model_id)
             if self._runtime_type == 'python':
                 python_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
             elif self._runtime_type == 'r':
                 r_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
             else:
                 raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
-            _model_complete.value = 1
-            logger.debug('Implementation method for model %s returned.', model_id)
+            api_state.model_complete.value = 1
+            process_logger.debug('Implementation method for model %s returned.', model_id)
 
             self._sender.send({
                 'state': COMPLETE,
                 'progress': 1.0
             })
         except BaseException as e:
-            logger.critical('Model failed with exception: %s', e)
+            process_logger.critical('Model failed with exception: %s', e)
 
             self.__post_exception(e, model_id)
 
@@ -224,27 +225,83 @@ class _WebAPILogHandler(logging.Handler):
         })
 
 
+class ApiState(object):
+    def __init__(self):
+        self.process = None
+        self.receiver = None
+        self.model_id = None
+        self.state = None
+        self.model_complete = None
+        self.started_timestamp = None
+        self.failed_timestamp = None
+        self._root_logger = None
+
+        self.reset()
+
+    def reset(self):
+        self.process = self.receiver = self.model_id = self.started_timestamp = self.failed_timestamp = None
+
+        self.state = {'state': PENDING}
+        self.model_complete = multiprocessing.Value('i', 0)
+
+        self._root_logger = logging.getLogger()
+        self._root_logger.addHandler(_WebAPILogHandler(self.state))
+
+    def check_subprocess_startup_timeout(self):
+        if self.subprocess_running:
+            return True
+
+        now = time.time()
+        if self.started_timestamp is None:
+            self.started_timestamp = now
+
+        return (now - self.started_timestamp) < _SUBPROCESS_STARTUP_TIME_LIMIT
+
+    def check_failure_cleanup_timeout(self):
+        now = time.time()
+        if self.failed_timestamp is None:
+            self.failed_timestamp = now
+
+        return (now - self.failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD
+
+    def fail_with_exception(self, message, dev_message, data):
+        self.state['state'] = FAILED
+        self.state['exception'] = {
+            'developer_msg': dev_message,
+            'msg': message,
+            'data': sanitize_dict_for_json(data),
+            'model_id': self.model_id
+        }
+
+    def set_log_level(self, level):
+        self._root_logger.setLevel(level)
+
+    @property
+    def model_state(self):
+        return self.state.get('state')
+
+    @model_state.setter
+    def model_state(self, state):
+        self.state['state'] = state
+
+    @property
+    def subprocess_starting(self):
+        return (self.process is not None) and not self.process.is_alive() and (self.model_state == PENDING)
+
+    @property
+    def subprocess_running(self):
+        return (self.process is not None) and self.process.is_alive()
+
+    @property
+    def model_running(self):
+        return self.subprocess_running and (self.model_state not in (COMPLETE, FAILED, TERMINATED))
+
+
 app = Flask(__name__)
 
-_process = _receiver = _state = _model_complete = _root_logger = _logger = _model_id = _failed_timestamp = None
+api_state = ApiState()
 
-
-def _reset():
-    global _process, _receiver, _state, _model_complete, _root_logger, _logger
-
-    _process = _receiver = None
-
-    _state = {'state': PENDING}
-    _model_complete = multiprocessing.Value('i', 0)
-
-    _root_logger = logging.getLogger()
-    _root_logger.addHandler(_WebAPILogHandler(_state))
-
-    _logger = logging.getLogger('WebAPI')
-
-
-_reset()
-
+logger = logging.getLogger('WebAPI')
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
 
 
@@ -271,34 +328,35 @@ def _load_entrypoint(path):
 
 
 def _get_state():
-    state = _state.get('state', None)
+    state = api_state.model_state
 
-    if (None not in (_process, _receiver)) and (state in (None, PENDING, RUNNING)):
+    if (None not in (api_state.process, api_state.receiver)) and (state in (None, PENDING, RUNNING)):
         try:
-            while _receiver.poll():
-                update = _receiver.recv()
-                _state.setdefault('log', []).extend(update.pop('log', []))
-                _state.update(update)
+            while api_state.receiver.poll():
+                update = api_state.receiver.recv()
+                api_state.state.setdefault('log', []).extend(update.pop('log', []))
+                api_state.state.update(update)
         except EOFError as e:
             print(e)  # TODO: handle better
 
     _check_for_abnormal_termination()
 
-    ret_val = copy.deepcopy(_state)
+    ret_val = copy.deepcopy(api_state.state)
     # CPS-952: purge old log messages.
-    if 'log' in _state:
-        purge_count = len(_state['log'])
+    if 'log' in api_state.state:
+        purge_count = len(api_state.state['log'])
         for i in range(purge_count, 0, -1):
             # count backwards always deleting the 0th item.
             # allows us to avoid clobbering incoming messages while we work.
-            del _state['log'][0]
+            del api_state.state['log'][0]
 
     ret_val['api_version'] = __version__
 
-    if (_process is not None) and _process.is_alive():
+    if api_state.subprocess_running:
+        # noinspection PyBroadException
         try:
             ret_val['stats'] = {
-                'peakMemoryUsage': get_peak_memory_usage(_process.pid)
+                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
             }
         except Exception:
             pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
@@ -307,77 +365,58 @@ def _get_state():
 
 
 def _check_for_abnormal_termination():
-    global _failed_timestamp, _process, _state
-
-    # Don't bother continuing if the model process hasn't started yet, is still running, or has already been marked
-    # finished.
-    if _process is None or _process.is_alive() or _state.get('state') in (COMPLETE, FAILED, TERMINATED):
+    # No need to worry if the model is running, or if it's still starting and the startup timeout hasn't elapsed.
+    if api_state.subprocess_running and api_state.check_subprocess_startup_timeout():
+        api_state.failed_timestamp = None
         return
 
-    # Record the time at which the model process is first detected to have failed.
-    if _failed_timestamp is None:
-        _failed_timestamp = time.time()
-
-    # Allow up to _ABNORMAL_TERMINATION_GRACE_PERIOD seconds for any pending messages from the model to come through the
-    # IPC pipe.
-    if (time.time() - _failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD:
+    # Continue running for a moment to allow any pending messages from the model to come through the IPC pipe.
+    if api_state.check_failure_cleanup_timeout():
         return
 
-    # At this point, the model must have terminated abnormally and the grace period elapsed. Attempt to clean up the
-    # defunct process.
-    _logger.critical('Model process has terminated abnormally. Waiting {} seconds for process cleanup.'.format(
-        _ABNORMAL_TERMINATION_GRACE_PERIOD
-    ))
-    _process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
+    # At this point, the model must have started or terminated abnormally and the grace period elapsed. Attempt to clean
+    # up the defunct process.
+    failure_mode = 'failed to start' if api_state.subprocess_starting else 'terminated abnormally'
+    message = 'Model "{}" {}.'.format(api_state.model_id, failure_mode)
+    logger.critical('{} Waiting {} seconds for process cleanup.'.format(message, _ABNORMAL_TERMINATION_GRACE_PERIOD))
+    api_state.process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
 
-    if _process.exitcode is None:
-        _logger.error('Failed to clean up model process.')
-    elif _process.exitcode < 0:
-        _logger.info('Process successfully cleaned up, exit code was {}.'.format(_process.exitcode))
+    if api_state.process.exitcode is None:
+        logger.error('Failed to clean up model process.')
+    elif api_state.process.exitcode < 0:
+        logger.info('Process successfully cleaned up, exit code was {}.'.format(api_state.process.exitcode))
 
-    _fail_with_exception(
-        'Model "{}" terminated abnormally.'.format(_model_id),
-        'Model "{}" terminated with exit code {}.'.format(_model_id, _process.exitcode),
-        {
-            'exitCode': _process.exitcode
-        }
+    api_state.fail_with_exception(
+        message,
+        'Model "{}" terminated with exit code {}.'.format(api_state.model_id, api_state.process.exitcode),
+        {'exitCode': api_state.process.exitcode}
     )
 
 
-def _fail_with_exception(message, dev_message, data):
-    _state['state'] = FAILED
-    _state['exception'] = {
-        'developer_msg': dev_message,
-        'msg': message,
-        'data': sanitize_dict_for_json(data),
-        'model_id': _model_id
-    }
-
-
 def terminate(timeout=0.0):
-    if _process is None:
+    if api_state.process is None:
         return  # Can't terminate model - it never started.
 
-    _logger.debug('Waiting %.2f seconds for model to terminate.', timeout)
+    logger.debug('Waiting %.2f seconds for model to terminate.', timeout)
 
-    _process.terminate()
-    _process.join(timeout)
+    api_state.process.terminate()
+    api_state.process.join(timeout)
 
-    if _process.is_alive():
-        _logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
-        os.kill(_process.pid, signal.SIGKILL)
+    if api_state.process.is_alive():
+        logger.warning('Model process failed to terminate within timeout. Sending SIGKILL.')
+        os.kill(api_state.process.pid, signal.SIGKILL)
     else:
-        _logger.debug('Model shut down cleanly.')
+        logger.debug('Model shut down cleanly.')
 
-    if _state['state'] not in (COMPLETE, FAILED):
-        _state['state'] = TERMINATED
+    if api_state.model_state not in (COMPLETE, FAILED):
+        api_state.model_state = TERMINATED
 
     # Make best-effort attempt to stop the web API.
     func = request.environ.get('werkzeug.server.shutdown')
     if callable(func):
         func()
     else:
-        _logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+        logger.warning('Unable to terminate model API (shutdown hook unavailable).')
 
 
 def _get_traceback(exc):
@@ -394,50 +433,48 @@ def _get_root():
 
 @app.route('/', methods=['POST'])
 def _post_root():
-    global _process, _receiver, _model_id
+    if api_state.process is not None:
+        return make_response(jsonify(_get_state()), 409)
 
-    if _process is not None and _process.is_alive():
-        return make_response(jsonify({'error': 'Cannot submit new job - job already running.'}), 409)
-
-    _reset()
+    api_state.reset()
 
     job_request = request.get_json(force=True, silent=True) or {}
 
     try:
-        _model_id = job_request['modelId']
+        api_state.model_id = job_request['modelId']
     except KeyError:
         return make_response(jsonify({'error': 'Required property "modelId" is missing.'}), 400)
 
     manifest, entrypoint = _load_entrypoint(app.config['model_path'])
 
     try:
-        model = manifest.models[_model_id]
+        model = manifest.models[api_state.model_id]
     except KeyError:
-        return make_response(jsonify({'error': 'Unknown model "{}".'.format(_model_id)}), 500)
+        return make_response(jsonify({'error': 'Unknown model "{}".'.format(api_state.model_id)}), 500)
 
     missing_ports = [port.name for port in model.ports if
                      port.required and (port.name not in job_request.get('ports', {}))]
 
     if missing_ports:
-        _logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
+        logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
 
     args = app.config.get('args', {})
     runtime_type = _determine_runtime_type(entrypoint, args)
 
-    _root_logger.setLevel(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
+    api_state.set_log_level(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
 
-    _receiver, sender = multiprocessing.Pipe(False)
-    job_process = _JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, _logger)
+    api_state.receiver, sender = multiprocessing.Pipe(False)
+    job_process = _JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, logger)
 
     try:
         with multiprocessing.get_context('spawn') as mp:
-            _process = mp.Process(target=job_process)
+            api_state.process = mp.Process(target=job_process)
     except (AttributeError, ValueError):
         # AttributeError if running pre-3.4 Python (and get_context() is therefore unavailable); ValueError if "spawn"
         # is unsupported.
-        _process = multiprocessing.Process(target=job_process)
+        api_state.process = multiprocessing.Process(target=job_process)
 
-    _process.start()
+    api_state.process.start()
 
     return _get_root()
 
@@ -467,6 +504,6 @@ def handle_500(e):
         dev_message = 'Original error: ' + dev_message + '\nTermination error: ' + str(termination_error)
         data['terminationTraceback'] = _get_traceback(termination_error)
 
-    _fail_with_exception(message, dev_message, data)
+    api_state.fail_with_exception(message, dev_message, data)
 
     return make_response(_get_root(), 500)

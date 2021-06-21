@@ -1,40 +1,17 @@
+
+from __future__ import absolute_import
+
 from as_models.ports import STREAM_COLLECTION_PORT, GRID_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, STREAM_PORT, \
     MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
-from .context import BaseContext
-from .python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context, CollectionPort
-from .util import resolve_service_config
-from . import ports
-from .manifest import Port
+from as_models.context import BaseContext
+from as_models.python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context, CollectionPort
+from as_models.util import resolve_service_config, urlparse, urljoin
+from as_models.manifest import Port
 
 from senaps_sensor.api import API
 
-import contextlib, requests, warnings
 
-try:
-    from functools import partialmethod
-except ImportError:
-    # Python 2 fallback: https://gist.github.com/carymrobbins/8940382
-    from functools import partial
-
-    class partialmethod(partial):
-        def __get__(self, instance, owner):
-            if instance is None:
-                return self
-
-            return partial(self.func, instance, *(self.args or ()), **(self.keywords or {}))
-
-@contextlib.contextmanager
-def ssl_verification_disabled():
-    old_request = requests.Session.request
-    requests.Session.request = partialmethod(old_request, verify=False)
-
-    warnings.filterwarnings('ignore', 'Unverified HTTPS request')
-    yield
-    warnings.resetwarnings()
-
-    requests.Session.request = old_request
-
-class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazily.
+class _SCApiProxy(API):  # TODO: see if there is a neat way to declare this lazily.
     def __init__(self, context, auth, host, api_root, verify=True):
         self._context = context
 
@@ -45,8 +22,10 @@ class _SCApiProxy(API): # TODO: see if there is a neat way to declare this lazil
 
         self._context.update(modified_streams=[streamid])
 
+
 def _generate_binding(required_val, **kwargs):
     return None if required_val is None else kwargs
+
 
 class Context(BaseContext):
     _port_type_map = {
