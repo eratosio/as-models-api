@@ -3,7 +3,9 @@
 import datetime
 import json
 import posixpath
+from requests.adapters import HTTPAdapter
 
+from .api_support import Retry
 from .constants import MAX_ERR_DATA_LEN
 from senaps_sensor.auth import HTTPBasicAuth, HTTPKeyAuth
 
@@ -11,6 +13,15 @@ try:
     import urlparse  # Python 2.7
 except ImportError:
     from urllib import parse as urlparse  # Python 3+
+
+
+RETRY_STRATEGY = Retry(
+    total=9,
+    status_forcelist=[429, 500, 502, 503, 504],
+    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+    backoff_factor=1
+)
+HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
 
 
 def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, apiRoot=None, apiKey=None, verify=True):
@@ -35,6 +46,19 @@ def resolve_service_config(url='', scheme=None, host=None, api_root=None, port=N
     url = urlparse.urlunparse((scheme, host, api_root) + parts[3:])
     
     return url, host, api_root, auth, verify
+
+
+def session_for_auth(auth, verify=None):
+    from requests import Session
+
+    session = Session()
+    session.verify = verify
+    session.auth = auth
+
+    session.mount('http://', HTTP_ADAPTER)
+    session.mount('https://', HTTP_ADAPTER)
+
+    return session
 
 
 def dump_to_json(token):

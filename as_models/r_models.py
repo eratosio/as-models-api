@@ -1,6 +1,9 @@
-import os
-from .ports import DOCUMENT_PORT, OUTPUT_PORT
+
 from .sentinel import Sentinel
+from .util import resolve_service_config, session_for_auth
+
+from as_client import Client
+import os
 
 try:
     import urlparse
@@ -23,12 +26,11 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     from rpy2.robjects import r, conversion
     from rpy2.rinterface import NULL
     from rpy2.robjects.vectors import ListVector
-    import rpy2.rinterface as ri
 
     model_id = job_request['modelId']
     model = manifest.models[model_id]
     # Load the model's module.
-    module = r.source(entrypoint)
+    r.source(entrypoint)
 
     # Locate a function matching the model ID.
     try:
@@ -48,12 +50,16 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     def convert_none(none):
         return NULL
 
+    # We may need an Analysis Service client for some backwards-compatibility hacks.
+    url, _, _, auth, verify = resolve_service_config(**job_request.get('analysisServicesConfiguration'))
+    analysis_client = Client(url, session=session_for_auth(auth, verify))
+
     # Convert request to R-compatible.
-    r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration', None))
-    r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration', None))
-    r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration', None))
-    r_ports = _convert_ports(model.ports, job_request.get('ports', {}))
-    r_update = _convert_update(updater.update, model, job_request.get('ports', {}))
+    r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration'))
+    r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration'))
+    r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration'))
+    r_ports = _convert_ports(model.ports, job_request.get('ports', {}), analysis_client)
+    r_update = _convert_update(updater.update, model, job_request.get('ports', {}), analysis_client)
     r_logger = _convert_logger(updater.log)
 
     # Create context object.
@@ -74,7 +80,7 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     implementation(ListVector(context))
 
 
-def _convert_ports(model_ports, port_bindings):
+def _convert_ports(model_ports, port_bindings, analysis_client):
     from rpy2.robjects.vectors import ListVector
 
     result = {}
@@ -98,11 +104,24 @@ def _convert_ports(model_ports, port_bindings):
                     print('dropping direction...')
                     iport.pop('direction')
 
-            result[str(port_name)] = list(map(lambda i: ListVector({str(k): v for k, v in i.items()}), inner_ports))
+            result[str(port_name)] = [_convert_port(i, analysis_client) for i in inner_ports]
         else:
-            result[str(port_name)] = ListVector(dict(**{str(k): v for k, v in port_config.items()}))
+            result[str(port_name)] = _convert_port(port_config, analysis_client)
 
     return ListVector(result)
+
+
+def _convert_port(port, analysis_client):
+    from rpy2.robjects.vectors import ListVector
+
+    port = {str(k): v for k, v in port.items()}
+
+    # Backwards compatibility: if the port's a document port, pre-load its value from the supplied document ID.
+    # TODO: deprecate this, and require R models to obtain the document value lazily.
+    if 'document' not in port and 'documentId' in port:
+        port['document'] = analysis_client.get_document_value(port['documentId'])
+
+    return ListVector(port)
 
 
 def _convert_service_config(config):
@@ -132,7 +151,7 @@ def _convert_service_config(config):
         return ListVector(result)
 
 
-def _convert_update(update, model, port_bindings):
+def _convert_update(update, model, port_bindings, analysis_client):
     import rpy2.rinterface as ri
     from rpy2.robjects.vectors import Vector, ListVector
 
@@ -145,12 +164,23 @@ def _convert_update(update, model, port_bindings):
             update_kwargs['progress'] = _extract_scalar(progress)
         if modified_streams not in (_SENTINEL, ri.NULL):
             update_kwargs['modified_streams'] = set(modified_streams)
+
+        # TODO: should we deprecate the following, and require R models to handle documents themselves?
         if modified_documents not in (_SENTINEL, ri.NULL):
             mod_docs = update_kwargs['modified_documents'] = {}
+
             for k, v in ListVector(modified_documents).items():
                 if not isinstance(v, Vector) or len(v) != 1:
                     raise ValueError('Value for document "{}" must be a scalar.'.format(k))
-                mod_docs[k] = {'document': str(_extract_scalar(v))}
+
+                value = str(_extract_scalar(v))
+
+                binding = port_bindings.get(k)
+                if (binding is None) or ('documentId' not in binding):
+                    mod_docs[k] = {'document': value}
+                else:
+                    document = analysis_client.get_document(binding['documentId'])
+                    analysis_client.set_document_value(document, value=value)
 
         update(**update_kwargs)
 
