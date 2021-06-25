@@ -114,14 +114,14 @@ def _convert_ports(model_ports, port_bindings, analysis_client):
 def _convert_port(port, analysis_client):
     from rpy2.robjects.vectors import ListVector
 
-    port = {str(k): v for k, v in port.items()}
+    port_dict = {str(k): v for k, v in port.items()}
 
     # Backwards compatibility: if the port's a document port, pre-load its value from the supplied document ID.
     # TODO: deprecate this, and require R models to obtain the document value lazily.
-    if 'document' not in port and 'documentId' in port:
-        port['document'] = analysis_client.get_document_value(port['documentId'])
+    if 'document' not in port_dict and 'documentId' in port_dict:
+        port_dict['document'] = analysis_client.get_document_value(port_dict['documentId'])
 
-    return ListVector(port)
+    return ListVector(port_dict)
 
 
 def _convert_service_config(config):
