@@ -168,23 +168,29 @@ class HostTests(unittest.TestCase):
             print(json.dumps(response['log'], indent=4, sort_keys=True))
 
     def test_all_port_types_model_r(self):
-            response, documents = self.run_model('r', {
-                    "modelId": "all_port_types_model",
-                    "ports": {
-                        "input_documents": { "ports": [{ "documentId": "indoc1", "document": "foo" }, { "document": "bar" }] },
-                        "input_streams": { "ports": [{"streamId": "s1"}, {"streamId": "s2"}]},
-                        "output_documents": {"ports": [{ "documentId": "outdoc1", "document": "foo foo"}, { "documentId": "outdoc2", "document": "bar bar"}]},
-                        "input_document": {"document": "single input"},
-                        "output_document": {"documentId": "abc", "document": "single output"}
-                    }
-                })
+        HostTests.mock_as.set_document('indoc1', 'foo', 'csiro')
+        HostTests.mock_as.set_document('indoc2', 'bar', 'csiro')
+        HostTests.mock_as.set_document('indoc3', 'single input', 'csiro')
+        HostTests.mock_as.set_document('outdoc1', 'foo foo', 'csiro')
+        HostTests.mock_as.set_document('outdoc2', 'bar bar', 'csiro')
+        HostTests.mock_as.set_document('outdoc3', 'single output', 'csiro')
 
-            # TODO: test collection updates when supported...
-            output_document = documents['output_document']
+        _, documents = self.run_model('r', {
+                "modelId": "all_port_types_model",
+                "ports": {
+                    "input_documents": {"ports": [{"documentId": "indoc1"}, {"documentId": "indoc2"}]},
+                    "input_streams": {"ports": [{"streamId": "s1"}, {"streamId": "s2"}]},
+                    "output_documents": {"ports": [{"documentId": "outdoc1"}, {"documentId": "outdoc2"}]},
+                    "input_document": {"documentId": "indoc3"},
+                    "output_document": {"documentId": "outdoc3"}
+                }
+            })
 
-            self.assertNotIn('input_documents', documents)
-            self.assertNotIn('input_document', documents)
-            self.assertEqual('single input updated', output_document['document']['value'])
+        self.assertEqual('single input updated', documents['outdoc3']['value'])
+
+        # TODO: test collection updates when supported...
+        # self.assertEqual('foo 0', documents['outdoc1']['value'])
+        # self.assertEqual('bar 1', documents['outdoc2']['value'])
 
     def test_all_port_types_model_python(self):
         HostTests.mock_as.set_document('indoc1', 'foo', 'csiro')

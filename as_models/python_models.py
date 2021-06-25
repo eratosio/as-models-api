@@ -3,7 +3,6 @@ import importlib
 import os
 import sys
 
-from requests.adapters import HTTPAdapter
 from senaps_sensor.api import API
 from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
@@ -11,19 +10,9 @@ from tds_client.util import urls
 
 from . import models
 from .context import BaseContext
-from .api_support import Retry
 from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
                     DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
-from .util import resolve_service_config
-
-
-RETRY_STRATEGY = Retry(
-    total=9,
-    status_forcelist=[429, 500, 502, 503, 504],
-    method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
-    backoff_factor=1
-)
-HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
+from .util import resolve_service_config, session_for_auth
 
 
 def is_valid_entrypoint(entrypoint):
@@ -54,19 +43,6 @@ def run_model(entrypoint, manifest, job_request, args, updater):
     # Run the callable.
     updater.update()  # Marks the job as running.
     implementation(Context(model, job_request, args, updater))
-
-
-def session_for_auth(auth, verify=None):
-    from requests import Session
-
-    session = Session()
-    session.verify = verify
-    session.auth = auth
-
-    session.mount('http://', HTTP_ADAPTER)
-    session.mount('https://', HTTP_ADAPTER)
-
-    return session
 
 
 def urlpath(url):
