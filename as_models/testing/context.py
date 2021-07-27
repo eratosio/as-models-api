@@ -1,6 +1,8 @@
 
 from __future__ import absolute_import
 
+import uuid
+
 from as_models.ports import STREAM_COLLECTION_PORT, GRID_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, STREAM_PORT, \
     MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
 from as_models.context import BaseContext
@@ -91,7 +93,16 @@ class Context(BaseContext):
                     binding = _generate_binding(stream_id, streamId=stream_id)
 
                 if value is not None:
-                    binding = _generate_binding(value, document=value)
+                    gen_doc_id = str(uuid.uuid4())
+                    binding = _generate_binding(value, document=value, documentId=gen_doc_id)
+                    # If we have an active AS client config, push value to generated documentid
+                    # (Analysis client may be pointing to a real service or a mocked service)
+                    if self.analysis_client:
+                        from as_client import Document
+                        document = Document()
+                        document.id = gen_doc_id
+                        document.organisation_id = 'testing'
+                        self.analysis_client.set_document_value(document, value=value)
 
                 if document_id:
                     binding = _generate_binding(document_id, documentId=document_id)
@@ -165,7 +176,7 @@ class Context(BaseContext):
     @property
     def analysis_client(self):
         if self._analysis_client is None and self._analysis_config is not None:
-            from as_client import Client
+            from as_client import Client, Document
 
             url, _, _, auth, verify = self._analysis_config
             self._analysis_client = Client(url, auth=auth)

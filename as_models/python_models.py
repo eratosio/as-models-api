@@ -111,6 +111,9 @@ class DocumentPort(PythonPort):
 
     @property
     def value(self):
+        if not self.was_supplied:
+            return None
+
         if self.__value is not None:
             return self.__value
 
