@@ -62,6 +62,13 @@ class TestTesting(unittest.TestCase):
         self.context.configure_analysis_client(url=TestTesting.mock_as.base_url)
 
         self.context.configure_port("doc", DOCUMENT_PORT, INPUT_PORT, value="abc")
+
+        self.context.configure_port("doc_org_grp", DOCUMENT_PORT, INPUT_PORT, value="abc2", doc_organisation_id='test_org', doc_group_ids=['g1'])
+        self.context.configure_port("doc_org", DOCUMENT_PORT, INPUT_PORT, value="abc3", doc_organisation_id='test_org')
+
+        self.assertEqual("abc2", self.context.analysis_client.get_document_value(self.context.ports.get('doc_org_grp').document_id))
+        self.assertEqual("abc3", self.context.analysis_client.get_document_value(self.context.ports.get('doc_org').document_id))
+
         self.context.configure_port("doc_empty_str", DOCUMENT_PORT, INPUT_PORT, value="")
         self.context.configure_port("doc_none", DOCUMENT_PORT, INPUT_PORT, value=None)
         self.context.configure_port("doc[]", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=["v1", "v2"])

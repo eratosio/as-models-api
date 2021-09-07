@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import uuid
+import logging
 
 from as_models.ports import STREAM_COLLECTION_PORT, GRID_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, STREAM_PORT, \
     MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
@@ -60,7 +61,16 @@ class Context(BaseContext):
                        value=None, values=None,
                        document_id=None, document_ids=None,
                        catalog_url=None, dataset_path=None,
-                       catalog_urls=None, dataset_paths=None):
+                       catalog_urls=None, dataset_paths=None,
+                       doc_organisation_id=None, doc_group_ids=None):
+        """
+        Configure a model port for testing. This method allows port to be defined
+        with appropriate mappings.
+        The value property can be used to provide an initial value for document port mappings. If an Analysis Service
+        client, doc_organisation_id and doc_group_id are also available the document will be pushed to the configured
+        Analysis Service. A mock Analysis Service is available in the testing.mock module.
+
+        """
         port = Port({'portName': name, 'direction': direction, 'type': type, 'required': False})
 
         try:
@@ -72,6 +82,9 @@ class Context(BaseContext):
 
                 if values:
                     binding_ports = [_generate_binding(value, document=value) for value in values]
+                    for value in values:
+                        gen_doc_id = str(uuid.uuid4())
+                        self.initialise_document(gen_doc_id, value, doc_organisation_id, doc_group_ids)
 
                 if document_ids:
                     binding_ports = [_generate_binding(document_id, documentId=document_id) for document_id in document_ids]
@@ -95,14 +108,7 @@ class Context(BaseContext):
                 if value is not None:
                     gen_doc_id = str(uuid.uuid4())
                     binding = _generate_binding(value, document=value, documentId=gen_doc_id)
-                    # If we have an active AS client config, push value to generated documentid
-                    # (Analysis client may be pointing to a real service or a mocked service)
-                    if self.analysis_client:
-                        from as_client import Document
-                        document = Document()
-                        document.id = gen_doc_id
-                        document.organisation_id = 'testing'
-                        self.analysis_client.set_document_value(document, value=value)
+                    self.initialise_document(gen_doc_id, value, doc_organisation_id, doc_group_ids)
 
                 if document_id:
                     binding = _generate_binding(document_id, documentId=document_id)
@@ -116,6 +122,25 @@ class Context(BaseContext):
             raise ValueError('Unsupported port type "{}"'.format(port.type))
 
         return self
+
+    def initialise_document(self, document_id, value, organisation_id, group_ids):
+        """
+        Initialise document in configured Analysis Service.
+        """
+
+        if not self.analysis_client:
+            return
+
+        if group_ids is None:
+            group_ids = []
+
+        if organisation_id:
+            from as_client import Document
+            document = Document()
+            document.id = document_id
+            document.organisation_id = organisation_id
+            document.group_ids = group_ids
+            self.analysis_client.set_document_value(document, value=value)
 
     def configure_sensor_client(self, url='', scheme=None, host=None, api_root=None, port=None, username=None, password=None, api_key=None, verify=True):
         self._sensor_config = resolve_service_config(url, scheme, host, api_root, port, username, password, api_key, verify=verify)
