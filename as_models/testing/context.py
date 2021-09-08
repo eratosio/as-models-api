@@ -2,7 +2,6 @@
 from __future__ import absolute_import
 
 import uuid
-import logging
 
 from as_models.ports import STREAM_COLLECTION_PORT, GRID_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, STREAM_PORT, \
     MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
