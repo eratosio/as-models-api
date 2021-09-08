@@ -136,6 +136,9 @@ class MockAnalysisServiceRequestHandler(BaseHTTPRequestHandler):
 
 
 class MockAnalysisServiceApi(HTTPServer):
+    """
+    Mock Senaps Analysis Service
+    """
     def __init__(self, base_path='/api/analysis', port=0):
         super(MockAnalysisServiceApi, self).__init__(('localhost', port), MockAnalysisServiceRequestHandler)
 

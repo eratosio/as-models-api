@@ -6,10 +6,18 @@ from as_models.ports import INPUT_PORT, DOCUMENT_PORT, DOCUMENT_COLLECTION_PORT,
 import unittest
 
 from as_models.r_models import _convert_ports
+from as_models.testing import Context, mock
 
 
 @unittest.skipIf(sys.version_info[:2] < (3, 5), 'as-models r support not tested for python < v3.5')
 class ContextTests(unittest.TestCase):
+    mock_as = mock.MockAnalysisServiceApi()
+
+    def setUp(self):
+        self.context = Context()
+        self.context.configure_analysis_client(url=ContextTests.mock_as.base_url)
+
+    @mock_as.activate
     def test_ports(self):
         model = Model({
             'id': 'test',
@@ -39,7 +47,7 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(model.ports, job_request.get('ports', {}))
+        ports = _convert_ports(model.ports, job_request.get('ports', {}), self.context.analysis_client)
 
         doc1 = ports.rx2('b')
         stream1 = ports.rx2('d')
@@ -50,8 +58,7 @@ class ContextTests(unittest.TestCase):
         self.assertEqual('\"cat1.xml\"', grid1.rx2('catalog').r_repr())
         self.assertEqual('\"data1.nc\"', grid1.rx2('dataset').r_repr())
 
-
-
+    @mock_as.activate
     def test_collection_ports(self):
         model = Model({
             'id': 'test',
@@ -80,12 +87,11 @@ class ContextTests(unittest.TestCase):
             }
         }
 
-        ports = _convert_ports(model.ports, job_request.get('ports', {}))
+        ports = _convert_ports(model.ports, job_request.get('ports', {}), self.context.analysis_client)
 
         doc1 = ports.rx2('a')[0]
         doc2 = ports.rx2('a')[1]
         print(doc1)
-
 
         # print (doc1)
         self.assertEqual('\"doc1\"', doc1.rx2('document').r_repr())
