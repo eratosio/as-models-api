@@ -62,6 +62,14 @@ try:
 except ImportError:
     pass
 
+try:
+    from senaps_sensor.error import SenapsError
+
+    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method, e.response.status_code, e.response.headers)))
+    _supported_libraries.append('senaps_sensor')
+
+except ImportError:
+    pass
 
 class BackoffStrategy:
     def get_backoff(self, request_count, method, status, headers):
