@@ -3,7 +3,6 @@ from __future__ import print_function
 
 import copy
 import datetime
-import json
 import logging
 import multiprocessing
 import os
@@ -16,10 +15,12 @@ import warnings
 
 from werkzeug.exceptions import InternalServerError
 
-from . import log_levels, python_models, r_models
+from . import log_levels
 from .exceptions import SenapsModelError
 from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
+from .python_models import PythonModelRuntime
+from .r_models import RModelRuntime
 from .sentinel import Sentinel
 from .stats import get_peak_memory_usage
 from .util import sanitize_dict_for_json
@@ -35,16 +36,6 @@ logging.captureWarnings(True)
 
 def _signalterm_handler(signum, stack):
     exit(0)
-
-
-def _determine_runtime_type(entrypoint, args):
-    try:
-        return args.pop('type')
-    except KeyError:
-        if python_models.is_valid_entrypoint(entrypoint):
-            return 'python'
-        elif r_models.is_valid_entrypoint(entrypoint):
-            return 'r'
 
 
 class _Updater(object):
@@ -130,10 +121,8 @@ class StreamRedirect(object):
 
 
 class _JobProcess(object):
-    def __init__(self, entrypoint, manifest, runtime_type, args, job_request, sender, logger_):
-        self._entrypoint = entrypoint
-        self._manifest = manifest
-        self._runtime_type = runtime_type
+    def __init__(self, model_runtime, args, job_request, sender, logger_):
+        self._model_runtime = model_runtime
         self._args = args
         self._job_request = job_request
         self._sender = sender
@@ -183,15 +172,11 @@ class _JobProcess(object):
 
         # Run the model!
         try:
-            # TODO: see if the runtime can be made more dynamic
             model_id = self._job_request['modelId']
+
             process_logger.debug('Calling implementation method for model %s...', model_id)
-            if self._runtime_type == 'python':
-                python_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
-            elif self._runtime_type == 'r':
-                r_models.run_model(self._entrypoint, self._manifest, self._job_request, self._args, updater)
-            else:
-                raise ValueError('Unsupported runtime type "{}".'.format(self._runtime_type))
+            self._model_runtime.execute_model(self._job_request, self._args, updater)
+
             api_state.model_complete.value = 1
             process_logger.debug('Implementation method for model %s returned.', model_id)
 
@@ -305,28 +290,6 @@ logger = logging.getLogger('WebAPI')
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
 
 
-def _load_entrypoint(path):
-    path = os.path.abspath(path)
-
-    # Locate manifest, if possible.
-    if os.path.isfile(path):
-        head, tail = os.path.split(path)
-        manifest_path = path if (tail == 'manifest.json') else os.path.join(head, 'manifest.json')
-    elif os.path.isdir(path):
-        manifest_path = os.path.join(path, 'manifest.json')
-    else:
-        raise RuntimeError('Unable to load model from path {} - path does not exist.'.format(path))
-
-    # Try to load the manifest.
-    try:
-        with open(manifest_path, 'r') as f:
-            manifest = Manifest(json.load(f))
-    except Exception as e:
-        raise RuntimeError('Failed to read manifest for model at {}: {}'.format(path, e))
-
-    return manifest, os.path.join(os.path.dirname(manifest_path), manifest.entrypoint)
-
-
 def _get_state():
     state = api_state.model_state
 
@@ -426,6 +389,37 @@ def _get_traceback(exc):
         pass
 
 
+def _load_runtime(model_path, runtime_type=None):
+    # Locate manifest, if possible.
+    if os.path.isfile(model_path):
+        head, tail = os.path.split(model_path)
+        manifest_path = model_path if (tail == 'manifest.json') else os.path.join(head, 'manifest.json')
+    elif os.path.isdir(model_path):
+        manifest_path = os.path.join(model_path, 'manifest.json')
+    else:
+        raise RuntimeError('Unable to load model from path {} - path does not exist.'.format(model_path))
+
+    try:
+        manifest = Manifest.from_file(manifest_path)
+    except Exception as e:
+        raise RuntimeError('Failed to read manifest for model at {}: {}'.format(model_path, e))
+
+    model_dir = os.path.dirname(manifest_path)
+    if runtime_type == 'python':
+        return PythonModelRuntime(model_dir, manifest)
+    elif runtime_type == 'r':
+        return RModelRuntime(model_dir, manifest)
+
+    candidate_runtimes = [runtime for runtime in (
+        PythonModelRuntime(model_dir, manifest), RModelRuntime(model_dir, manifest)
+    ) if runtime.is_valid()]
+
+    if len(candidate_runtimes) != 1:
+        raise ValueError('Unable to resolve model runtime engine.')
+
+    return candidate_runtimes[0]
+
+
 @app.route('/', methods=['GET'])
 def _get_root():
     return jsonify(_get_state())
@@ -445,10 +439,15 @@ def _post_root():
     except KeyError:
         return make_response(jsonify({'error': 'Required property "modelId" is missing.'}), 400)
 
-    manifest, entrypoint = _load_entrypoint(app.config['model_path'])
+    args = app.config.get('args', {})
+    model_runtime = _load_runtime(app.config['model_path'], args.get('type'))
+    if model_runtime is None or not model_runtime.is_valid():
+        return make_response(jsonify({
+            'error': 'Failed to resolve runtime engine for model "{}".'.format(api_state.model_id)
+        }), 500)
 
     try:
-        model = manifest.models[api_state.model_id]
+        model = model_runtime.manifest.models[api_state.model_id]
     except KeyError:
         return make_response(jsonify({'error': 'Unknown model "{}".'.format(api_state.model_id)}), 500)
 
@@ -458,13 +457,10 @@ def _post_root():
     if missing_ports:
         logger.warning('Missing bindings for required model port(s): {}'.format(', '.join(missing_ports)))
 
-    args = app.config.get('args', {})
-    runtime_type = _determine_runtime_type(entrypoint, args)
-
     api_state.set_log_level(log_levels.to_stdlib_levelno(args.get('log_level', 'INFO')))
 
     api_state.receiver, sender = multiprocessing.Pipe(False)
-    job_process = _JobProcess(entrypoint, manifest, runtime_type, args, job_request, sender, logger)
+    job_process = _JobProcess(model_runtime, args, job_request, sender, logger)
 
     try:
         with multiprocessing.get_context('spawn') as mp:

@@ -1,4 +1,5 @@
 
+from .runtime import ModelRuntime
 from .sentinel import Sentinel
 from .util import resolve_service_config, session_for_auth
 
@@ -16,68 +17,65 @@ except ImportError:
 _SENTINEL = Sentinel()
 
 
-def is_valid_entrypoint(entrypoint):
-    entrypoint = os.path.abspath(entrypoint)
+class RModelRuntime(ModelRuntime):
+    def is_valid(self):
+        return os.path.isfile(self.entrypoint_path) and (os.path.splitext(self.entrypoint_path)[1].lower() == '.r')
 
-    return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.r')
+    def execute_model(self, job_request, args, updater):
+        from rpy2.robjects import r, conversion
+        from rpy2.rinterface import NULL
+        from rpy2.robjects.vectors import ListVector
 
+        model_id = job_request['modelId']
+        model = self.manifest.models[model_id]
 
-def run_model(entrypoint, manifest, job_request, args, updater):
-    from rpy2.robjects import r, conversion
-    from rpy2.rinterface import NULL
-    from rpy2.robjects.vectors import ListVector
+        # Load the model's module.
+        r.source(self.entrypoint_path)
 
-    model_id = job_request['modelId']
-    model = manifest.models[model_id]
-    # Load the model's module.
-    r.source(entrypoint)
+        # Locate a function matching the model ID.
+        try:
+            implementation = r[model_id]
+        except LookupError:
+            # TODO: more specific exception type?
+            raise RuntimeError('Unable to locate function "{}" in {}.'.format(model_id, self.entrypoint_path))
+        if not callable(implementation):
+            # TODO: more specific exception type?
+            raise RuntimeError('Member "{}" of file {} is not a callable function.'.format(model_id, self.entrypoint))
 
-    # Locate a function matching the model ID.
-    try:
-        implementation = r[model_id]
-    except LookupError:
-        # TODO: more specific exception type?
-        raise RuntimeError('Unable to locate function "{}" in model "{}".'.format(model_id,
-                                                                                  entrypoint))
-    if not callable(implementation):
-        # TODO: more specific exception type?
-        raise RuntimeError('Member "{}" of model "{}" is not a callable function.'.format(model_id,
-                                                                                          entrypoint))
+        # Enable custom conversions.
+        # Requires rpy2==3.3.x (r_requirements.txt)
+        @conversion.py2rpy.register(type(None))
+        def convert_none(none):
+            return NULL
 
-    # Enable custom conversions.
-    # Requires rpy2==3.3.x (r_requirements.txt)
-    @conversion.py2rpy.register(type(None))
-    def convert_none(none):
-        return NULL
+        # We may need an Analysis Service client for some backwards-compatibility hacks.
+        url, _, _, auth, verify = resolve_service_config(**job_request.get('analysisServicesConfiguration'))
+        analysis_client = Client(url, session=session_for_auth(auth, verify))
 
-    # We may need an Analysis Service client for some backwards-compatibility hacks.
-    url, _, _, auth, verify = resolve_service_config(**job_request.get('analysisServicesConfiguration'))
-    analysis_client = Client(url, session=session_for_auth(auth, verify))
+        # Convert request to R-compatible.
+        r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration'))
+        r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration'))
+        r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration'))
+        r_ports = _convert_ports(model.ports, job_request.get('ports', {}), analysis_client)
+        r_update = _convert_update(updater.update, model, job_request.get('ports', {}), analysis_client)
+        r_logger = _convert_logger(updater.log)
 
-    # Convert request to R-compatible.
-    r_sensor_config = _convert_service_config(job_request.get('sensorCloudConfiguration'))
-    r_analysis_config = _convert_service_config(job_request.get('analysisServicesConfiguration'))
-    r_thredds_config = _convert_service_config(job_request.get('threddsConfiguration'))
-    r_ports = _convert_ports(model.ports, job_request.get('ports', {}), analysis_client)
-    r_update = _convert_update(updater.update, model, job_request.get('ports', {}), analysis_client)
-    r_logger = _convert_logger(updater.log)
+        # Create context object.
+        context = {
+            'ports': r_ports,
+            'update': r_update,
+            'log': r_logger
+        }
+        if r_sensor_config:
+            context['sensor_config'] = r_sensor_config
+        if r_analysis_config:
+            context['analysis_config'] = r_analysis_config
+        if r_thredds_config:
+            context['thredds_config'] = r_thredds_config
 
-    # Create context object.
-    context = {
-        'ports': r_ports,
-        'update': r_update,
-        'log': r_logger
-    }
-    if r_sensor_config:
-        context['sensor_config'] = r_sensor_config
-    if r_analysis_config:
-        context['analysis_config'] = r_analysis_config
-    if r_thredds_config:
-        context['thredds_config'] = r_thredds_config
-
-    # Run the implementation.
-    updater.update()  # Marks the job as running.
-    implementation(ListVector(context))
+        # Run the implementation.
+        updater.update()  # Marks the job as running.
+        implementation(ListVector(context))
 
 
 def _convert_ports(model_ports, port_bindings, analysis_client):
