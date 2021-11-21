@@ -5,7 +5,7 @@ from as_models.ports import INPUT_PORT, DOCUMENT_PORT, DOCUMENT_COLLECTION_PORT,
 
 import unittest
 
-from as_models.r_models import _convert_ports
+from as_models.runtime.r import _convert_ports
 from as_models.testing import Context, mock
 
 

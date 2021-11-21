@@ -1,7 +1,7 @@
 from as_models.manifest import Model
 from as_models.ports import INPUT_PORT, DOCUMENT_PORT, DOCUMENT_COLLECTION_PORT, STREAM_COLLECTION_PORT, \
     GRID_COLLECTION_PORT, STREAM_PORT, GRID_PORT
-from as_models.python_models import Context
+from as_models.runtime.python import Context
 
 import unittest
 

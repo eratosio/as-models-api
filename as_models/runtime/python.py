@@ -8,12 +8,12 @@ from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
 from tds_client.util import urls
 
-from . import models
-from .context import BaseContext
-from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
-                    DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
+from .. import models
+from ..context import BaseContext
+from ..ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
+                     DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
 from .runtime import ModelRuntime
-from .util import resolve_service_config, session_for_auth
+from ..util import resolve_service_config, session_for_auth
 
 
 class PythonModelRuntime(ModelRuntime):

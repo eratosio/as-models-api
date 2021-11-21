@@ -1,7 +1,7 @@
 
 from .runtime import ModelRuntime
-from .sentinel import Sentinel
-from .util import resolve_service_config, session_for_auth
+from ..sentinel import Sentinel
+from ..util import resolve_service_config, session_for_auth
 
 from as_client import Client
 import os

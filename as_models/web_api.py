@@ -19,8 +19,8 @@ from . import log_levels
 from .exceptions import SenapsModelError
 from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
-from .python_models import PythonModelRuntime
-from .r_models import RModelRuntime
+from .runtime.python import PythonModelRuntime
+from .runtime.r import RModelRuntime
 from .sentinel import Sentinel
 from .stats import get_peak_memory_usage
 from .util import sanitize_dict_for_json

@@ -1,15 +1,11 @@
-import functools
-import json
-import time
 
-from requests import HTTPError
+import json
 
 from as_models.manifest import Manifest
 from as_models.web_api import _load_runtime
 
-import requests
-
-import os, multiprocessing, sys, unittest
+import os
+import unittest
 
 from as_models.web_api import app
 
