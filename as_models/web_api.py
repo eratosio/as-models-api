@@ -19,6 +19,7 @@ from . import log_levels
 from .exceptions import SenapsModelError
 from .manifest import Manifest
 from .model_state import PENDING, RUNNING, COMPLETE, TERMINATED, FAILED
+from .runtime.matlab import MatlabModelRuntime
 from .runtime.python import PythonModelRuntime
 from .runtime.r import RModelRuntime
 from .sentinel import Sentinel
@@ -405,12 +406,16 @@ def _load_runtime(model_path, runtime_type=None):
         raise RuntimeError('Failed to read manifest for model at {}: {}'.format(model_path, e))
 
     model_dir = os.path.dirname(manifest_path)
-    if runtime_type == 'python':
+    if runtime_type == 'matlab':
+        return MatlabModelRuntime(model_dir, manifest)
+    elif runtime_type == 'python':
         return PythonModelRuntime(model_dir, manifest)
     elif runtime_type == 'r':
         return RModelRuntime(model_dir, manifest)
 
     candidate_runtimes = [runtime for runtime in (
+        # NOTE: the Matlab runtime is deliberately omitted from this list due to difficulty in automatically checking if
+        # a given entrypoint is for a Matlab model. Matlab execution must be explicitly requested using `runtime_type`.
         PythonModelRuntime(model_dir, manifest), RModelRuntime(model_dir, manifest)
     ) if runtime.is_valid()]
 

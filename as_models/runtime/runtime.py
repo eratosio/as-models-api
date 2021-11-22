@@ -23,3 +23,7 @@ class ModelRuntime(ABC):
     @property
     def entrypoint_path(self):
         return os.path.join(self.model_dir, self.entrypoint)
+
+    @property
+    def manifest_path(self):
+        return os.path.join(self.model_dir, 'manifest.json')
