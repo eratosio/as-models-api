@@ -32,11 +32,11 @@ class MatlabModelRuntime(ModelRuntime):
 
     def _get_classpath(self):
         classpath_entries = [
-            '.',
-            self.model_dir,
+            os.path.join('.', '*'),
+            os.path.join(self.model_dir, '*'),
             *os.environ.get('CLASSPATH', '').split(os.pathsep),
-            os.path.join(self._java_home, 'lib'),
-            os.path.join(self._java_home, 'jre', 'lib')
+            os.path.join(self._java_home, 'lib', '*'),
+            os.path.join(self._java_home, 'jre', 'lib', '*')
         ]
 
         classpath_entries = [os.path.abspath(entry) for entry in classpath_entries]
