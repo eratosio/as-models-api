@@ -5,8 +5,9 @@ import select
 import subprocess
 
 
-def execute(command, updater):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+def execute(command, updater, **kwargs):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+                               **kwargs)
 
     exit_code = None
     while True:

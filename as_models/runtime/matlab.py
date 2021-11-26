@@ -22,10 +22,13 @@ class MatlabModelRuntime(ModelRuntime):
         with open(MatlabModelRuntime.REQUEST_FILE_PATH, 'w') as f:
             json.dump(job_request, f)
 
+        # Add job request and manifest paths to Matlab environment
+        env = dict(os.environ, JOB_REQUEST_PATH=MatlabModelRuntime.REQUEST_FILE_PATH, MANIFEST_PATH=self.manifest_path)
+
         # Run the Matlab code using the Java runtime.
         updater.update()  # Marks the job as running.
         exit_code = subprocess.execute([self._jvm_path, '-cp', self._get_classpath(), self.entrypoint,
-                                        MatlabModelRuntime.REQUEST_FILE_PATH, self.manifest_path], updater)
+                                        MatlabModelRuntime.REQUEST_FILE_PATH, self.manifest_path], updater, env=env)
 
         if exit_code != 0:
             updater.log("Matlab model process failed with exit code {}.".format(exit_code), level=log_levels.CRITICAL)
