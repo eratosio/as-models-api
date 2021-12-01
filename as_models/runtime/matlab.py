@@ -14,6 +14,7 @@ class MatlabModelRuntime(ModelRuntime):
         # TODO: the "proper" way to do this would be to see if the entrypoint is on the classpath (perhaps using javap).
         try:
             _ = self._java_home
+            return True
         except AttributeError:
             return False
 
