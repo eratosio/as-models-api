@@ -28,11 +28,14 @@ class MatlabModelRuntime(ModelRuntime):
 
         # Run the Matlab code using the Java runtime.
         updater.update()  # Marks the job as running.
-        exit_code = subprocess.execute([self._jvm_path, '-cp', self._get_classpath(), self.entrypoint,
-                                        MatlabModelRuntime.REQUEST_FILE_PATH, self.manifest_path], updater, env=env)
+        command = [self._jvm_path, '-cp', self._get_classpath(), self.entrypoint, MatlabModelRuntime.REQUEST_FILE_PATH,
+                   self.manifest_path]
+        self.logger.debug('Matlab execution environment: %s', env)
+        self.logger.debug('Matlab execution command: %s', command)
+        exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env)
 
         if exit_code != 0:
-            updater.log("Matlab model process failed with exit code {}.".format(exit_code), level=log_levels.CRITICAL)
+            raise RuntimeError("Matlab model process failed with exit code {}.".format(exit_code))
 
     def _get_classpath(self):
         classpath_entries = [

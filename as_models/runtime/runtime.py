@@ -1,5 +1,6 @@
 
 from abc import ABC, abstractmethod
+import logging
 import os
 
 
@@ -7,6 +8,7 @@ class ModelRuntime(ABC):
     def __init__(self, model_dir, manifest):
         self.model_dir = os.path.abspath(model_dir)
         self.manifest = manifest
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
     def is_valid(self):
