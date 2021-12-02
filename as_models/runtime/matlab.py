@@ -63,6 +63,10 @@ class MatlabModelRuntime(ModelRuntime):
             return abs_entry
         elif os.path.isdir(abs_entry):
             return os.path.join(abs_entry, '*')
+        
+        head, tail = os.path.split(abs_entry)
+        if tail == '*' and os.path.isdir(head):
+            return abs_entry
 
     @property
     def _java_home(self):
