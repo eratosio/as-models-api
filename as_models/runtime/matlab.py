@@ -4,7 +4,6 @@ import os
 
 from . import subprocess
 from .runtime import ModelRuntime
-from .. import log_levels
 
 
 class MatlabModelRuntime(ModelRuntime):
@@ -32,29 +31,38 @@ class MatlabModelRuntime(ModelRuntime):
                    self.manifest_path]
         self.logger.debug('Matlab execution environment: %s', env)
         self.logger.debug('Matlab execution command: %s', command)
+        self.logger.info('NOTE: Output from Matlab is prefixed [MATLAB].')
         exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env)
 
         if exit_code != 0:
             raise RuntimeError("Matlab model process failed with exit code {}.".format(exit_code))
 
     def _get_classpath(self):
+        # Add a few useful entries to the classpath.
         classpath_entries = [
-            os.path.join('.', '*'),
-            os.path.join(self.model_dir, '*'),
+            '.',
+            self.model_dir,
             *os.environ.get('CLASSPATH', '').split(os.pathsep),
-            os.path.join(self._java_home, 'lib', '*'),
-            os.path.join(self._java_home, 'jre', 'lib', '*')
+            os.path.join(self._java_home, 'lib'),
+            os.path.join(self._java_home, 'jre', 'lib')
         ]
 
-        classpath_entries = [os.path.abspath(entry) for entry in classpath_entries]
+        # Resolve absolute paths of classpath entries.
+        classpath_entries = [MatlabModelRuntime._resolve_classpath_entry(entry) for entry in classpath_entries]
 
         # Remove duplicates and non-existing entries, preserving order.
         known = set()
-        classpath_entries = [
-            entry for entry in classpath_entries if os.path.exists(entry) and not (entry in known or known.add(entry))
-        ]
+        classpath_entries = [entry for entry in classpath_entries if entry and not (entry in known or known.add(entry))]
 
         return os.pathsep.join(classpath_entries)
+
+    @staticmethod
+    def _resolve_classpath_entry(entry):
+        abs_entry = os.path.abspath(entry)
+        if os.path.isfile(abs_entry):
+            return abs_entry
+        elif os.path.isdir(abs_entry):
+            return os.path.join(abs_entry, '*')
 
     @property
     def _java_home(self):
