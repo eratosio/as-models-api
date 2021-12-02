@@ -27,8 +27,7 @@ class MatlabModelRuntime(ModelRuntime):
 
         # Run the Matlab code using the Java runtime.
         updater.update()  # Marks the job as running.
-        command = [self._jvm_path, '-cp', self._get_classpath(), self.entrypoint, MatlabModelRuntime.REQUEST_FILE_PATH,
-                   self.manifest_path]
+        command = [self._jvm_path, '-cp', self._get_classpath(), self.entrypoint]
         self.logger.debug('Matlab execution environment: %s', env)
         self.logger.debug('Matlab execution command: %s', command)
         self.logger.info('NOTE: Output from Matlab is prefixed [MATLAB].')
