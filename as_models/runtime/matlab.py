@@ -7,7 +7,7 @@ from .runtime import ModelRuntime
 
 
 class MatlabModelRuntime(ModelRuntime):
-    REQUEST_FILE_PATH = '/tmp/job_request.json'
+    REQUEST_FILE_NAME = 'job_request.json'
 
     def is_valid(self):
         # TODO: the "proper" way to do this would be to see if the entrypoint is on the classpath (perhaps using javap).
@@ -19,11 +19,12 @@ class MatlabModelRuntime(ModelRuntime):
 
     def execute_model(self, job_request, args, updater):
         # Dump the job request out to file - the Matlab code will read it in later.
-        with open(MatlabModelRuntime.REQUEST_FILE_PATH, 'w') as f:
+        request_file_path = os.path.join(os.getcwd(), MatlabModelRuntime.REQUEST_FILE_NAME)
+        with open(request_file_path, 'w') as f:
             json.dump(job_request, f)
 
         # Add job request and manifest paths to Matlab environment
-        env = dict(os.environ, JOB_REQUEST_PATH=MatlabModelRuntime.REQUEST_FILE_PATH, MANIFEST_PATH=self.manifest_path)
+        env = dict(os.environ, JOB_REQUEST_PATH=request_file_path, MANIFEST_PATH=self.manifest_path)
 
         # Run the Matlab code using the Java runtime.
         updater.update()  # Marks the job as running.
