@@ -3,7 +3,7 @@ import unittest
 from as_models import testing
 from as_models.ports import STREAM_PORT, INPUT_PORT, STREAM_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, DOCUMENT_PORT, \
     GRID_PORT, GRID_COLLECTION_PORT
-from testing.mock import MockAnalysisServiceApi
+from as_models.testing.mock import MockAnalysisServiceApi
 
 
 class TestTesting(unittest.TestCase):

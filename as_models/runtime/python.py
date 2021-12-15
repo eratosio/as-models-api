@@ -8,41 +8,39 @@ from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
 from tds_client.util import urls
 
-from . import models
-from .context import BaseContext
-from .ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
-                    DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
-from .util import resolve_service_config, session_for_auth
+from .. import models
+from ..context import BaseContext
+from ..ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
+                     DOCUMENT_COLLECTION_PORT, GRID_COLLECTION_PORT, OUTPUT_PORT)
+from .runtime import ModelRuntime
+from ..util import resolve_service_config, session_for_auth
 
 
-def is_valid_entrypoint(entrypoint):
-    entrypoint = os.path.abspath(entrypoint)
+class PythonModelRuntime(ModelRuntime):
+    def is_valid(self):
+        return os.path.isfile(self.entrypoint_path) and (os.path.splitext(self.entrypoint_path)[1].lower() == '.py')
 
-    return os.path.isfile(entrypoint) and (os.path.splitext(entrypoint)[1].lower() == '.py')
+    def execute_model(self, job_request, args, updater):
+        model_id = job_request['modelId']
+        model = self.manifest.models[model_id]
 
+        # Load the model's module.
+        module_name, _ = os.path.splitext(self.entrypoint)
+        sys.path.append(self.model_dir)
+        module = importlib.import_module(module_name)
 
-def run_model(entrypoint, manifest, job_request, args, updater):
-    model_id = job_request['modelId']
-    model = manifest.models[model_id]
+        # Locate a callable matching the model ID.
+        try:
+            implementation = models._models[model_id]
+        except KeyError:
+            implementation = getattr(module, model_id, None)
+        if not callable(implementation):
+            # TODO: more specific exception type here?
+            raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, self.entrypoint_path))
 
-    # Load the model's module.
-    model_dir, model_file = os.path.split(entrypoint)
-    module_name, module_ext = os.path.splitext(model_file)
-    sys.path.append(model_dir)
-    module = importlib.import_module(module_name)
-
-    # Locate a callable matching the model ID.
-    try:
-        implementation = models._models[model_id]
-    except KeyError:
-        implementation = getattr(module, model_id, None)
-    if not callable(implementation):
-        # TODO: more specific exception type here?
-        raise RuntimeError('Unable to locate callable "{}" in model "{}".'.format(model_id, entrypoint))
-
-    # Run the callable.
-    updater.update()  # Marks the job as running.
-    implementation(Context(model, job_request, args, updater))
+        # Run the callable.
+        updater.update()  # Marks the job as running.
+        implementation(Context(model, job_request, args, updater))
 
 
 def urlpath(url):
