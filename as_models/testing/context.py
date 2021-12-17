@@ -6,8 +6,8 @@ import uuid
 from as_models.ports import STREAM_COLLECTION_PORT, GRID_COLLECTION_PORT, DOCUMENT_COLLECTION_PORT, STREAM_PORT, \
     MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT
 from as_models.context import BaseContext
-from as_models.python_models import StreamPort, MultistreamPort, DocumentPort, GridPort, Context, CollectionPort
-from as_models.util import resolve_service_config, urlparse, urljoin
+from as_models.runtime.python import StreamPort, MultistreamPort, DocumentPort, GridPort, Context, CollectionPort
+from as_models.util import resolve_service_config
 from as_models.manifest import Port
 
 from senaps_sensor.api import API

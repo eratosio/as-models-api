@@ -1,15 +1,11 @@
-import functools
-import json
-import time
 
-from requests import HTTPError
+import json
 
 from as_models.manifest import Manifest
-from as_models.web_api import _load_entrypoint
+from as_models.web_api import _load_runtime
 
-import requests
-
-import os, multiprocessing, sys, unittest
+import os
+import unittest
 
 from as_models.web_api import app
 
@@ -84,30 +80,30 @@ class TestModel(object):
     def __exit__(self, *args):
         self._test_client.__exit__(None, None, None)
 
-class EntrypointTests(unittest.TestCase):
+class RuntimeTests(unittest.TestCase):
     def test_load_from_directory(self):
         resources = get_model_path()
 
-        manifest, entrypoint = _load_entrypoint(resources['model_path'])
+        runtime = _load_runtime(resources['model_path'])
         
-        self.assertEqual(manifest, resources['manifest'])
-        self.assertEqual(entrypoint, resources['entrypoint_path'])
+        self.assertEqual(runtime.manifest, resources['manifest'])
+        self.assertEqual(runtime.entrypoint_path, resources['entrypoint_path'])
     
     def test_load_from_manifest(self):
         resources = get_model_path()
 
-        manifest, entrypoint = _load_entrypoint(resources['manifest_path'])
+        runtime = _load_runtime(resources['manifest_path'])
         
-        self.assertEqual(manifest, resources['manifest'])
-        self.assertEqual(entrypoint, resources['entrypoint_path'])
+        self.assertEqual(runtime.manifest, resources['manifest'])
+        self.assertEqual(runtime.entrypoint_path, resources['entrypoint_path'])
     
     def test_load_from_entrypoint(self):
         resources = get_model_path()
 
-        manifest, entrypoint = _load_entrypoint(resources['entrypoint_path'])
+        runtime = _load_runtime(resources['entrypoint_path'])
         
-        self.assertEqual(manifest, resources['manifest'])
-        self.assertEqual(entrypoint, resources['entrypoint_path'])
+        self.assertEqual(runtime.manifest, resources['manifest'])
+        self.assertEqual(runtime.entrypoint_path, resources['entrypoint_path'])
 
 
 class HostTests(unittest.TestCase):
