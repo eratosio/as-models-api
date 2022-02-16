@@ -57,6 +57,10 @@ class TestTesting(unittest.TestCase):
         self.assertEqual("cat2", self.context.ports["grid[]"][1].catalog_url)
         self.assertEqual("dat2", self.context.ports["grid[]"][1].dataset_path)
 
+        # Ensure writing to port works when no as-api client is configured.
+        self.context.ports['doc[]'][0].value = 'new_value'
+        self.assertEqual(self.context.ports['doc[]'][0].value, 'new_value')
+
     @mock_as.activate
     def test_configure_ports_with_mocked_as(self):
         self.context.configure_analysis_client(url=TestTesting.mock_as.base_url)
@@ -65,6 +69,7 @@ class TestTesting(unittest.TestCase):
 
         self.context.configure_port("doc_org_grp", DOCUMENT_PORT, INPUT_PORT, value="abc2", doc_organisation_id='test_org', doc_group_ids=['g1'])
         self.context.configure_port("doc_org", DOCUMENT_PORT, INPUT_PORT, value="abc3", doc_organisation_id='test_org')
+        self.context.configure_port("doc[]_org", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=["abc1", "abc2"], doc_organisation_id="test_org")
 
         self.assertEqual("abc2", self.context.analysis_client.get_document_value(self.context.ports.get('doc_org_grp').document_id))
         self.assertEqual("abc3", self.context.analysis_client.get_document_value(self.context.ports.get('doc_org').document_id))
@@ -102,4 +107,12 @@ class TestTesting(unittest.TestCase):
         self.assertEqual("d1 value", self.context.ports["docId[]"][0].value)
         self.assertEqual("d2 value", self.context.ports["docId[]"][1].value)
 
+        # Ensure writing to document nodes work with mocked server and configured client
+        self.context.ports['doc[]_org'][1].value = 'new_value'
+        self.assertEqual(self.context.ports['doc[]_org'][1].value, 'new_value')
+        self.assertEqual(TestTesting.mock_as.documents[self.context.ports['doc[]_org'][1].document_id]['value'], 'new_value')
 
+        self.context.ports['doc_org'].value = 'new_value'
+        self.assertEqual(TestTesting.mock_as.documents[self.context.ports['doc_org'].document_id]['value'],
+                         'new_value')
+        self.assertEqual(self.context.ports['doc_org'].value, 'new_value')

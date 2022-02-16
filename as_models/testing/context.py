@@ -80,9 +80,10 @@ class Context(BaseContext):
                     binding_ports = [_generate_binding(stream_id, streamId=stream_id) for stream_id in stream_ids]
 
                 if values:
-                    binding_ports = [_generate_binding(value, document=value) for value in values]
+                    binding_ports = []
                     for value in values:
                         gen_doc_id = str(uuid.uuid4())
+                        binding_ports.append(_generate_binding(value, document=value, documentId=gen_doc_id))
                         self.initialise_document(gen_doc_id, value, doc_organisation_id, doc_group_ids)
 
                 if document_ids:

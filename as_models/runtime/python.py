@@ -127,7 +127,7 @@ class DocumentPort(PythonPort):
     @value.setter
     def value(self, value):
         if value != self.__value:
-            if self.was_supplied:
+            if self.was_supplied and self._context.analysis_client:
                 self._context.analysis_client.set_document_value(self.__get_document(), value=value)
 
             self.__value = value
