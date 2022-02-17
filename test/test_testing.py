@@ -61,6 +61,17 @@ class TestTesting(unittest.TestCase):
         self.context.ports['doc[]'][0].value = 'new_value'
         self.assertEqual(self.context.ports['doc[]'][0].value, 'new_value')
 
+    def test_doc_collection_inner_ports_should_be_singular_type(self):
+        self.context.configure_port("doc[]_org", DOCUMENT_COLLECTION_PORT, INPUT_PORT, values=["abc1", "abc2"],
+                                    doc_organisation_id="test_org")
+        self.assertEqual(self.context.ports['doc[]_org'][0].type, 'document')
+
+    def test_stream_collection_inner_ports_should_be_singular_type(self):
+        self.context.configure_port("streams[]", STREAM_COLLECTION_PORT, INPUT_PORT, stream_ids=['a','b'])
+
+        self.assertEqual(self.context.ports['streams[]'][0].type, 'stream')
+
+
     @mock_as.activate
     def test_configure_ports_with_mocked_as(self):
         self.context.configure_analysis_client(url=TestTesting.mock_as.base_url)
