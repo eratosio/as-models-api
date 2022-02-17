@@ -30,14 +30,18 @@ def _generate_binding(required_val, **kwargs):
 
 
 class Context(BaseContext):
+
+    _collection_inner_port_type = {
+        STREAM_COLLECTION_PORT: STREAM_PORT,
+        DOCUMENT_COLLECTION_PORT: DOCUMENT_PORT,
+        GRID_COLLECTION_PORT: GRID_PORT
+    }
+
     _port_type_map = {
         STREAM_PORT: StreamPort,
         MULTISTREAM_PORT: MultistreamPort,
         DOCUMENT_PORT: DocumentPort,
-        GRID_PORT: GridPort,
-        STREAM_COLLECTION_PORT: StreamPort,
-        DOCUMENT_COLLECTION_PORT: DocumentPort,
-        GRID_COLLECTION_PORT: GridPort
+        GRID_PORT: GridPort
     }
 
     def __init__(self, model_id=None):
@@ -95,7 +99,10 @@ class Context(BaseContext):
 
                 binding = {'ports': binding_ports}
 
-                inner_ports = [Context._port_type_map[port.type](self, port, inner_binding) for inner_binding in binding_ports]
+                inner_port_type = Context._collection_inner_port_type[port.type]
+                inner_port = Port({'portName': name, 'direction': direction, 'type': inner_port_type, 'required': False})
+                inner_ports = [Context._port_type_map[inner_port.type](self, inner_port, inner_binding) for inner_binding in binding_ports]
+
                 self.ports._add(CollectionPort(self, port, binding, inner_ports))
             else:
                 port_type = Context._port_type_map[type]
