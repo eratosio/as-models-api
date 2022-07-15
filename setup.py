@@ -23,7 +23,8 @@ setup(
     packages=find_packages(),
     long_description=read('readme.md'),
     install_requires=[
-        'flask==1.1.2'
+        'flask==1.1.2',
+        'jinja2<3.1.0'
     ],
     test_requires=[
         'httpretty==1.0.5',
