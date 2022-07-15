@@ -2,7 +2,7 @@ git+https://bitbucket.csiro.au/scm/sc/sensor-api-python-client.git@v2.12.0#egg=s
 git+https://bitbucket.csiro.au/scm/sc/tds-client-python.git@v1.1.2#egg=tds_client
 git+https://bitbucket.csiro.au/scm/sc/tdm-client-python.git@v2.31.2#egg=tdm
 git+https://bitbucket.csiro.au/scm/sc/as-client-python.git@v2.20.0#egg=as_client
-flask==1.1.2
-jinja2<3.1.0
+flask==1.1.4
+MarkupSafe>0.23,<=2.0.1
 enum34==1.1.10
 requests>=2.22.0,<3.0.0
