@@ -1,6 +1,10 @@
 import inspect
 
-from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
+from senaps_sensor.error import SenapsError
+
+from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT, _Retryable, \
+    RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, \
+    _default_retryable_connection_errors
 from datetime import datetime, timedelta
 import json
 import httpretty
@@ -80,6 +84,22 @@ class RetriesTests(unittest.TestCase):
         self.assertEqual(expected_status, response.status_code)
         self.assertEqual(expected_body, response.json())
         self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_retry_decorator_sensor_client_error(self):
+
+        def make_request():
+            raise SenapsError("Failed to send request: %s" % ConnectionAbortedError(ConnectionResetError()))
+
+        retryable = _Retryable(make_request, 2, ANY, RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, _default_retryable_connection_errors)
+
+        try:
+            retryable()
+        except SenapsError:
+            pass
+
+        self.assertEqual(retryable._request_count, 3)
+
 
     @httpretty.activate
     def test_retry_decorator_when_rate_limited(self):

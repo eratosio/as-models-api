@@ -74,7 +74,9 @@ except ImportError:
 try:
     from senaps_sensor.error import SenapsError
 
-    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method, e.response.status_code, e.response.headers)))
+    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method if getattr(e, 'response') and getattr(e.response, 'request') else None,
+                                                         e.response.status_code if getattr(e, 'response') and getattr(e.response, 'status_code') else None,
+                                                         e.response.headers if getattr(e, 'response') and getattr(e.response, 'headers') else None)))
     _supported_libraries.append('senaps_sensor')
 
 except ImportError:
@@ -169,21 +171,23 @@ class _Retryable(object):
         self._retryable_connection_errors = retryable_connection_errors
         self._connection_error_strategy = connection_error_strategy
 
+        self._request_count = 0
+
     def __call__(self, *args, **kwargs):
-        request_count = 0
+        self._request_count = 0
 
         while True:
-            request_count += 1
+            self._request_count += 1
 
             try:
                 return self.fn(*args, **kwargs)
             except Exception as e:
                 # If we're outta retries, give up now.
-                if request_count > self._retries:
+                if self._request_count > self._retries:
                     raise
 
                 # If unable to back off, re-raise the exception.
-                if not self._back_off(request_count, e):
+                if not self._back_off(self._request_count, e):
                     raise
 
     def __get__(self, instance, owner):
@@ -208,11 +212,20 @@ class _Retryable(object):
 
             # Check that the request method and status are retryable.
             method, status, headers = extractor(exception)
-            if not _is_retryable_value(method, self._retryable_methods) or not _is_retryable_value(status, self._retryable_statuses):
+
+            # Note the SenapsError can actually wrap a connection error, however there is no way to tell without patching the sensor client library.
+            # Instead, we assume no request data means it was actually a connection error
+            if any([method, status, headers]) and (
+                not _is_retryable_value(method, self._retryable_methods) or not _is_retryable_value(status,
+                                                                                                    self._retryable_statuses)):
                 return False
 
             # Sleep until the backoff period has elapsed.
-            backoff = self._backoff_strategy.get_backoff(request_count, method, status, headers)
+            if not any([method, status, headers]):
+                backoff = self._connection_error_strategy.get_backoff(request_count, None, None, None)
+            else:
+                backoff = self._backoff_strategy.get_backoff(request_count, method, status, headers)
+
             _logger.info('HTTP request failed, backing off {} seconds then retrying.'.format(backoff))
             _logger.debug('HTTP error was: {}'.format(exception))
             time.sleep(backoff)
