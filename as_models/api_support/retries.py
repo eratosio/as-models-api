@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import random
 from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
@@ -89,12 +89,19 @@ class BackoffStrategy:
 
 
 class ExponentialBackoffStrategy(BackoffStrategy):
-    def __init__(self, unit, base=2.0):
+    def __init__(self, unit, base=2.0, cap=600, jitter=0):
         self.unit = unit
         self.base = base
+        self.cap = cap
+
+        # jitter is from 0-1.
+        # 1 = Full jitter, where the backoff is selected randomly between the exponential backoff and zero
+        # 0 = Zero jitter, where the backoff is purely exponential.
+        self.jitter = jitter
 
     def get_backoff(self, request_count, method, status, headers):
-        return self.unit * (self.base ** (request_count - 1))
+        capped_exp_backoff = min(self.cap, self.unit * (self.base ** (request_count - 1)))
+        return random.uniform(capped_exp_backoff*(1-self.jitter), capped_exp_backoff)
 
 
 class KongBackoffStrategy(ExponentialBackoffStrategy):
