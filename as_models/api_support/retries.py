@@ -208,7 +208,7 @@ class _Retryable(object):
                 continue
 
             backoff = self._connection_error_strategy.get_backoff(request_count, None, None, None)
-            _logger.info('ConnectionError, backing off {} seconds then retrying.'.format(backoff))
+            _logger.info('ConnectionError, type {}, args {} backing off {} seconds then retrying.'.format(type(exception), getattr(exception, 'args', ''), backoff))
             time.sleep(backoff)
             return True
 
@@ -233,8 +233,8 @@ class _Retryable(object):
             else:
                 backoff = self._backoff_strategy.get_backoff(request_count, method, status, headers)
 
-            _logger.info('HTTP request failed, backing off {} seconds then retrying.'.format(backoff))
-            _logger.debug('HTTP error was: {}'.format(exception))
+            _logger.info('HTTP request failed ({}), backing off {} seconds then retrying.'.format(status, backoff))
+            _logger.debug('HTTP error was: status {}: {}'.format(status, exception))
             time.sleep(backoff)
             return True
 
