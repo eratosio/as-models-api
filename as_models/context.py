@@ -2,9 +2,10 @@
 from .util import urlparse
 
 from abc import ABCMeta, abstractmethod, abstractproperty
-from collections import Mapping
+from collections.abc import Mapping
 
-ABC = ABCMeta('ABC', (object,), {}) # compatible with Python 2 *and* 3
+ABC = ABCMeta('ABC', (object,), {})  # compatible with Python 2 *and* 3
+
 
 class Ports(Mapping):
     def __init__(self):
@@ -25,8 +26,9 @@ class Ports(Mapping):
         except KeyError:
             raise AttributeError('Unknown attribute "{}"'.format(attr))
 
-    def _add(self, port): # For use by context classes.
+    def _add(self, port):  # For use by context classes.
         self.__ports[port.name] = port
+
 
 class BaseContext(ABC):
     def __init__(self):
