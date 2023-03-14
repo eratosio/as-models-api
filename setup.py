@@ -14,6 +14,7 @@ def get_version(version_file):
 
 setup(
     name='as_models',
+    python_requires=">=3.7",
     version=get_version('as_models/version.py'),
     author='Mac Coombe',
     author_email='mac.coombe@csiro.au',
@@ -23,12 +24,13 @@ setup(
     packages=find_packages(),
     long_description=read('readme.md'),
     install_requires=[
-        'flask==1.1.4',
-        'MarkupSafe>0.23,<=2.0.1'
+        'flask==2.2.3'
     ],
     test_requires=[
-        'httpretty==1.0.5',
-        'webob==1.8.7'
+        'httpretty==1.1.4',
+        'webob==1.8.7',
+        'xarray==0.18.0',
+        'rpy2==3.3.3'
     ],
     extras_require={
         'r': ['rpy2==3.3.3'],
@@ -40,6 +42,6 @@ setup(
         'Intended Audience :: Developers',
         'Natural Language :: English',
         'Operating System :: POSIX',
-        'Programming Language :: Python :: 2.7'
+        'Programming Language :: Python :: 3.7+'
     ]
 )

@@ -1,4 +1,6 @@
-six==1.11.0
-httpretty==1.0.5
+six==1.16.0
+httpretty==1.1.4
 webob==1.8.7
 xarray==0.18.0
+# to run  tests for R, need rpy2. Below is newer 
+rpy2==3.3.3	# latest is 3.5.9 and only supports python >=3.7, which breaks our 3.6 R image
