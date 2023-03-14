@@ -376,6 +376,7 @@ def terminate(timeout=0.0):
         api_state.model_state = TERMINATED
 
     # Make best-effort attempt to stop the web API.
+    # TODO: 2023-03-06: this development shutdown hook is NOT available any longer. We need an alternative way to make tests work nicely.
     func = request.environ.get('werkzeug.server.shutdown')
     if callable(func):
         func()
