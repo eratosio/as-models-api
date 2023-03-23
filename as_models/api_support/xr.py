@@ -19,7 +19,7 @@ from xarray import Variable
 from xarray.core import indexing
 from xarray.core.pycompat import integer_types
 from xarray.core.utils import Frozen, is_dict_like
-from xarray.backends.common import AbstractDataStore, BackendArray
+from xarray.backends.common import AbstractDataStore, BackendArray, robust_getitem
 
 # LazilyOuterIndexedArray and FrozenOrderedDict renamed in later versions of xarray.
 try:
@@ -52,10 +52,13 @@ class PydapArrayWrapper(BackendArray):
 
     @retry(retryable_methods=ANY)
     def _getitem(self, key):
-        result = self.array[key]
-
+        # pull the data from the array attribute if possible, to avoid
+        # downloading coordinate data twice
+        array = getattr(self.array, "array", self.array)
+        result = robust_getitem(array, key, catch=ValueError)
+        # in some cases, pydap doesn't squeeze axes automatically like numpy
         axis = tuple(n for n, k in enumerate(key) if isinstance(k, integer_types))
-        if len(axis) > 0:
+        if result.ndim + len(axis) != array.ndim and axis:
             result = np.squeeze(result, axis)
 
         return result
