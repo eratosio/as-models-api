@@ -33,24 +33,26 @@ except ImportError:
     from xarray.core.utils import FrozenOrderedDict as FrozenDict
 
 
+retry_connection_errors = {ConnectionError, StopIteration, TimeoutError, IndexError}
+
 class PydapArrayWrapper(BackendArray):
     def __init__(self, array):
         self.array = array
 
     @property
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def shape(self):
         return self.array.shape
 
     @property
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def dtype(self):
         return self.array.dtype
 
     def __getitem__(self, key):
         return indexing.explicit_indexing_adapter(key, self.shape, indexing.IndexingSupport.BASIC, self._getitem)
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def _getitem(self, key):
         # pull the data from the array attribute if possible, to avoid
         # downloading coordinate data twice
@@ -91,23 +93,23 @@ class PydapDataStore(AbstractDataStore):
         return PydapDataStore.open(dataset.opendap.url, dataset.client.session)
 
     @classmethod
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open(cls, url, session=None):
         return cls(pydap.client.open_url(url, session=session))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open_store_variable(self, var):
         data = LazilyIndexedArray(PydapArrayWrapper(var))
         return Variable(var.dimensions, data, _fix_attributes(var.attributes))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_variables(self):
         return FrozenDict((k, self.open_store_variable(self.ds[k])) for k in self.ds.keys())
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_attrs(self):
         return Frozen(_fix_attributes(self.ds.attributes))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_dimensions(self):
         return Frozen(self.ds.dimensions)
