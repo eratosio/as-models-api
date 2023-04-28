@@ -74,9 +74,9 @@ except ImportError:
 try:
     from senaps_sensor.error import SenapsError
 
-    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method if getattr(e, 'response') and getattr(e.response, 'request') else None,
-                                                         e.response.status_code if getattr(e, 'response') and getattr(e.response, 'status_code') else None,
-                                                         e.response.headers if getattr(e, 'response') and getattr(e.response, 'headers') else None)))
+    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method if hasattr(e, 'response') and hasattr(e.response, 'request') else None,
+                                                         e.response.status_code if hasattr(e, 'response') and hasattr(e.response, 'status_code') else None,
+                                                         e.response.headers if hasattr(e, 'response') and hasattr(e.response, 'headers') else None)))
     _supported_libraries.append('senaps_sensor')
 
 except ImportError:

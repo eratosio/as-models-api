@@ -93,10 +93,8 @@ class RetriesTests(unittest.TestCase):
 
         retryable = _Retryable(make_request, 2, ANY, RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, _default_retryable_connection_errors)
 
-        try:
+        with self.assertRaises(SenapsError):
             retryable()
-        except SenapsError:
-            pass
 
         self.assertEqual(retryable._request_count, 3)
 
