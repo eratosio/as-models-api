@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import random
 from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
@@ -26,6 +26,9 @@ RETRIES = 10
 RETRYABLE_METHODS = {'HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'}
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
+_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError}
+
+
 ANY = 'any'
 
 # Kong's non-standard rate limiting headers and appropriate backoff times. In each case, we back off half of the rate
@@ -47,6 +50,10 @@ try:
     from requests import HTTPError as _HTTPError
     _metadata_extractors.append((_HTTPError, lambda e: (e.request.method, e.response.status_code, e.response.headers)))
     _supported_libraries.append('requests')
+
+    from requests import ConnectionError, Timeout
+    _default_retryable_connection_errors = _default_retryable_connection_errors | {ConnectionError, Timeout}
+
 except ImportError:
     pass
 
@@ -59,17 +66,22 @@ try:
     # for the method here. Users of @retry will need to specify retryable_methods='ANY' for retries to work.
     _metadata_extractors.append((_HTTPError, lambda e: (None, e.status_code, e.headers)))
     _supported_libraries.append('webob')
+
+
 except ImportError:
     pass
 
 try:
     from senaps_sensor.error import SenapsError
 
-    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method, e.response.status_code, e.response.headers)))
+    _metadata_extractors.append((SenapsError, lambda e: (e.response.request.method if hasattr(e, 'response') and hasattr(e.response, 'request') else None,
+                                                         e.response.status_code if hasattr(e, 'response') and hasattr(e.response, 'status_code') else None,
+                                                         e.response.headers if hasattr(e, 'response') and hasattr(e.response, 'headers') else None)))
     _supported_libraries.append('senaps_sensor')
 
 except ImportError:
     pass
+
 
 class BackoffStrategy:
     def get_backoff(self, request_count, method, status, headers):
@@ -77,12 +89,19 @@ class BackoffStrategy:
 
 
 class ExponentialBackoffStrategy(BackoffStrategy):
-    def __init__(self, unit, base=2.0):
+    def __init__(self, unit, base=2.0, cap=600, jitter=0):
         self.unit = unit
         self.base = base
+        self.cap = cap
+
+        # jitter is from 0-1.
+        # 1 = Full jitter, where the backoff is selected randomly between the exponential backoff and zero
+        # 0 = Zero jitter, where the backoff is purely exponential.
+        self.jitter = jitter
 
     def get_backoff(self, request_count, method, status, headers):
-        return self.unit * (self.base ** (request_count - 1))
+        capped_exp_backoff = min(self.cap, self.unit * (self.base ** (request_count - 1)))
+        return random.uniform(capped_exp_backoff*(1-self.jitter), capped_exp_backoff)
 
 
 class KongBackoffStrategy(ExponentialBackoffStrategy):
@@ -119,6 +138,7 @@ class KongBackoffStrategy(ExponentialBackoffStrategy):
 
 
 DEFAULT_BACKOFF_STRATEGY = KongBackoffStrategy(unit=0.1)
+DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY = ExponentialBackoffStrategy(unit=0.1)
 
 
 def _is_retryable_value(value, retryable_values):
@@ -147,7 +167,7 @@ def _parse_retry_delay_header(delay):
 
 
 class _Retryable(object):
-    def __init__(self, fn, retries, retryable_methods, retryable_statuses, backoff_strategy):
+    def __init__(self, fn, retries, retryable_methods, retryable_statuses, backoff_strategy, connection_error_strategy, retryable_connection_errors):
         functools.update_wrapper(self, fn)
 
         self.fn = fn
@@ -155,48 +175,78 @@ class _Retryable(object):
         self._retryable_methods = retryable_methods
         self._retryable_statuses = retryable_statuses
         self._backoff_strategy = backoff_strategy
+        self._retryable_connection_errors = retryable_connection_errors
+        self._connection_error_strategy = connection_error_strategy
+
+        self._request_count = 0
 
     def __call__(self, *args, **kwargs):
-        request_count = 0
+        self._request_count = 0
 
         while True:
-            request_count += 1
+            self._request_count += 1
 
             try:
                 return self.fn(*args, **kwargs)
             except Exception as e:
                 # If we're outta retries, give up now.
-                if request_count > self._retries:
+                if self._request_count > self._retries:
                     raise
 
                 # If unable to back off, re-raise the exception.
-                if not self._back_off(request_count, e):
+                if not self._back_off(self._request_count, e):
                     raise
 
     def __get__(self, instance, owner):
         return functools.partial(self, instance)
 
     def _back_off(self, request_count, exception):
+
+        # Handle connection error back offs
+        for cls in self._retryable_connection_errors:
+            if not isinstance(exception, cls):
+                continue
+
+            backoff = self._connection_error_strategy.get_backoff(request_count, None, None, None)
+            _logger.info('ConnectionError, type {}, args {} backing off {} seconds then retrying.'.format(type(exception), getattr(exception, 'args', ''), backoff))
+            time.sleep(backoff)
+            return True
+
+        # Handle HTTP error back offs
         for cls, extractor in _metadata_extractors:
             if not isinstance(exception, cls):
                 continue
 
             # Check that the request method and status are retryable.
             method, status, headers = extractor(exception)
-            if not _is_retryable_value(method, self._retryable_methods) or not _is_retryable_value(status, self._retryable_statuses):
+
+            # Note the SenapsError can actually wrap a connection error, however there is no way to tell without patching the sensor client library.
+            # Instead, we assume no request data means it was actually a connection error
+            if any([method, status, headers]) and (
+                not _is_retryable_value(method, self._retryable_methods) or not _is_retryable_value(status,
+                                                                                                    self._retryable_statuses)):
                 return False
 
             # Sleep until the backoff period has elapsed.
-            backoff = self._backoff_strategy.get_backoff(request_count, method, status, headers)
-            _logger.info('HTTP request failed, backing off {} seconds then retrying.'.format(backoff))
-            _logger.debug('HTTP error was: {}'.format(exception))
+            if not any([method, status, headers]):
+                backoff = self._connection_error_strategy.get_backoff(request_count, None, None, None)
+            else:
+                backoff = self._backoff_strategy.get_backoff(request_count, method, status, headers)
+
+            _logger.info('HTTP request failed ({}), backing off {} seconds then retrying.'.format(status, backoff))
+            _logger.debug('HTTP error was: status {}: {}'.format(status, exception))
             time.sleep(backoff)
             return True
 
         return False
 
 
-def retry(retries=RETRIES, retryable_methods=None, retryable_statuses=None, backoff_strategy=DEFAULT_BACKOFF_STRATEGY):
+def retry(retries=RETRIES,
+          retryable_methods=None,
+          retryable_statuses=None,
+          backoff_strategy=DEFAULT_BACKOFF_STRATEGY,
+          retryable_connection_errors=None,
+          connection_error_strategy=DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY):
     """
     When used to decorate a function, causes that function to be automatically retried if an HTTP error occurs. This
     works by catching exceptions thrown by known HTTP request libraries, examining their contents and - if retrying is
@@ -210,21 +260,25 @@ def retry(retries=RETRIES, retryable_methods=None, retryable_statuses=None, back
     :param retryable_statuses: The HTTP status codes (e.g. 200, 401, etc) for which to allow retries. If omitted,
     defaults to {}. Provide the ANY constant from this module to allow retry for all HTTP status codes.
     :param backoff_strategy: The BackoffStrategy to use. If omitted, defaults to KongBackoffStrategy(unit=0.1).
+    :param retryable_connection_errors: The set of exception classes to catch as retryable connection errors. If omitted, default to bultin connection error exceptions and support HTTP library specific exceptions.
+    :param connection_error_strategy: The BackOffStrategy to use for connection errors. If omitted, defautls to ExponentialBackoffStrategy(unit=0.1)
     :return: The wrapped retryable function.
     """.format(', '.join(_supported_libraries), RETRIES, RETRYABLE_METHODS, RETRYABLE_STATUSES)
 
     # If the 'retries' argument is a callable and the other arguments are their defaults, assume we're being called as a
     # parameterless decorator. Directly wrap the passed callable.
     if callable(retries) and (retryable_methods is None) and (retryable_statuses is None):
-        return _Retryable(retries, RETRIES, RETRYABLE_METHODS, RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY)
+        return _Retryable(retries, RETRIES, RETRYABLE_METHODS, RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, _default_retryable_connection_errors)
 
     if retryable_methods is None:
         retryable_methods = RETRYABLE_METHODS
     if retryable_statuses is None:
         retryable_statuses = RETRYABLE_STATUSES
+    if retryable_connection_errors is None:
+        retryable_connection_errors = _default_retryable_connection_errors
 
     def wrapper(fn):
-        return _Retryable(fn, retries, retryable_methods, retryable_statuses, backoff_strategy)
+        return _Retryable(fn, retries, retryable_methods, retryable_statuses, backoff_strategy, connection_error_strategy, retryable_connection_errors)
 
     return wrapper
 
