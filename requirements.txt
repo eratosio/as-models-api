@@ -6,3 +6,4 @@ flask==2.2.3	# beware: python 3.7+!!!
 # MarkupSafe>0.23,<=2.0.1 # should not be required to specify this, let flask bring it in.
 enum34==1.1.10
 requests>=2.22.0,<3.0.0
+urllib3>=1.26.0 # ensure guaranteed support for Retry allowed_methods property following deprecation of method_whitelist property
