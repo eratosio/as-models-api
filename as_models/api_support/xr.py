@@ -10,7 +10,7 @@ NOTES:
       to configure the retry decorator to retry on ANY request method. This should be safe, since PyDAP should only ever
       be making HEAD and GET requests anyway.
 """
-
+from .pydap_patches import create_request_from_session_patched
 from .retries import ANY, retry
 
 import numpy as np
@@ -34,6 +34,10 @@ except ImportError:
 
 
 retry_connection_errors = {ConnectionError, StopIteration, TimeoutError, IndexError}
+
+# Monkey patch Pydap to stop it from doing HEAD requests.
+pydap.net.create_request_from_session = create_request_from_session_patched
+
 
 class PydapArrayWrapper(BackendArray):
     def __init__(self, array):
