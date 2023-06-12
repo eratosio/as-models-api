@@ -29,7 +29,13 @@ from .version import __version__
 
 _SENTINEL = Sentinel()
 _SUBPROCESS_STARTUP_TIME_LIMIT = 30.0  # seconds
-_ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
+
+# Allow a short grace period between a model completing execution and forcibly terminating its subprocess, to allow for
+# last-minute status updates to be pulled off the IPC pipe.
+_MODEL_RESOLUTION_GRACE_PERIOD_SEC = 5.0
+
+# If model terminates prematurely, limit how long we'll wait for process cleanup.
+_ABNORMAL_TERMINATION_TIMEOUT_SEC = 5.0  # seconds
 
 
 logging.captureWarnings(True)
@@ -219,13 +225,13 @@ class ApiState(object):
         self.state = None
         self.model_complete = None
         self.started_timestamp = None
-        self.failed_timestamp = None
+        self.resolved_timestamp = None
         self._root_logger = None
 
         self.reset()
 
     def reset(self):
-        self.process = self.receiver = self.model_id = self.started_timestamp = self.failed_timestamp = None
+        self.process = self.receiver = self.model_id = self.started_timestamp = self.resolved_timestamp = None
 
         self.state = {'state': PENDING}
         self.model_complete = multiprocessing.Value('i', 0)
@@ -243,12 +249,11 @@ class ApiState(object):
 
         return (now - self.started_timestamp) < _SUBPROCESS_STARTUP_TIME_LIMIT
 
-    def check_failure_cleanup_timeout(self):
-        now = time.time()
-        if self.failed_timestamp is None:
-            self.failed_timestamp = now
+    def check_if_cleanup_grace_period_elapsed(self):
+        if self.resolved_timestamp is None:
+            return False
 
-        return (now - self.failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD
+        return (time.time() - self.resolved_timestamp) > _MODEL_RESOLUTION_GRACE_PERIOD_SEC
 
     def fail_with_exception(self, message, dev_message, data):
         self.state['state'] = FAILED
@@ -268,7 +273,11 @@ class ApiState(object):
 
     @model_state.setter
     def model_state(self, state):
-        self.state['state'] = state
+        if not self.in_resolved_state:
+            self.state['state'] = state
+
+            if self.in_resolved_state and self.resolved_timestamp is None:
+                self.resolved_timestamp = time.time()
 
     @property
     def subprocess_starting(self):
@@ -280,7 +289,11 @@ class ApiState(object):
 
     @property
     def model_running(self):
-        return self.subprocess_running and (self.model_state not in (COMPLETE, FAILED, TERMINATED))
+        return self.subprocess_running and not self.in_resolved_state
+
+    @property
+    def in_resolved_state(self):
+        return self.model_state in {COMPLETE, FAILED, TERMINATED}
 
 
 app = Flask(__name__)
@@ -292,20 +305,46 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask 
 
 
 def _get_state():
-    state = api_state.model_state
+    stats = None
 
-    if (None not in (api_state.process, api_state.receiver)) and (state in (None, PENDING, RUNNING)):
+    if api_state.subprocess_running:
+        # noinspection PyBroadException
         try:
+            stats = {
+                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
+            }
+        except Exception:
+            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
+    elif api_state.subprocess_starting:
+        pass
+    elif not api_state.in_resolved_state:
+        if api_state.subprocess_starting:
+            message = 'Model failed to start.'
+        else:
+            logger.critical('Model terminated prematurely, waiting {} seconds for process cleanup')
+            api_state.process.join(_ABNORMAL_TERMINATION_TIMEOUT_SEC)
+
+            exit_code = api_state.process.exitcode
+            exit_description = 'unknown' if exit_code is None else exit_code
+            message = 'Model terminated prematurely (exit code {}).'.format(exit_description)
+
+        api_state.fail_with_exception(
+            message,
+            'Model "{}" terminated with exit code {}.'.format(api_state.model_id, api_state.process.exitcode),
+            {'exitCode': api_state.process.exitcode}
+        )
+
+    try:
+        if None not in (api_state.process, api_state.receiver):
             while api_state.receiver.poll():
                 update = api_state.receiver.recv()
                 api_state.state.setdefault('log', []).extend(update.pop('log', []))
                 api_state.state.update(update)
-        except EOFError as e:
-            print(e)  # TODO: handle better
-
-    _check_for_abnormal_termination()
+    except EOFError:
+        pass  # Normal, occurs when IPC pipe is closed.
 
     ret_val = copy.deepcopy(api_state.state)
+
     # CPS-952: purge old log messages.
     if 'log' in api_state.state:
         purge_count = len(api_state.state['log'])
@@ -315,47 +354,9 @@ def _get_state():
             del api_state.state['log'][0]
 
     ret_val['api_version'] = __version__
-
-    if api_state.subprocess_running:
-        # noinspection PyBroadException
-        try:
-            ret_val['stats'] = {
-                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
-            }
-        except Exception:
-            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
+    ret_val['stats'] = stats
 
     return ret_val
-
-
-def _check_for_abnormal_termination():
-    # No need to worry if the model is running, or if it's still starting and the startup timeout hasn't elapsed.
-    if api_state.subprocess_running and api_state.check_subprocess_startup_timeout():
-        api_state.failed_timestamp = None
-        return
-
-    # Continue running for a moment to allow any pending messages from the model to come through the IPC pipe.
-    if api_state.check_failure_cleanup_timeout():
-        return
-
-    # At this point, the model must have started or terminated abnormally and the grace period elapsed. Attempt to clean
-    # up the defunct process.
-    failure_mode = 'failed to start' if api_state.subprocess_starting else 'terminated abnormally'
-    message = 'Model "{}" {}.'.format(api_state.model_id, failure_mode)
-    logger.critical('{} Waiting {} seconds for process cleanup.'.format(message, _ABNORMAL_TERMINATION_GRACE_PERIOD))
-    api_state.process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
-
-    if api_state.process.exitcode is None:
-        logger.error('Failed to clean up model process.')
-    elif api_state.process.exitcode < 0:
-        logger.info('Process successfully cleaned up, exit code was {}.'.format(api_state.process.exitcode))
-
-    api_state.fail_with_exception(
-        message,
-        'Model "{}" terminated with exit code {}.'.format(api_state.model_id, api_state.process.exitcode),
-        {'exitCode': api_state.process.exitcode}
-    )
-
 
 def terminate(timeout=0.0):
     if api_state.process is None:

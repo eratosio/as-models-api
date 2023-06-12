@@ -2,7 +2,7 @@
 from .util import urlparse
 
 from abc import ABCMeta, abstractmethod, abstractproperty
-from collections import Mapping
+from collections.abc import Mapping
 
 ABC = ABCMeta('ABC', (object,), {}) # compatible with Python 2 *and* 3
 
