@@ -227,6 +227,7 @@ class ApiState(object):
         self.started_timestamp = None
         self.resolved_timestamp = None
         self._root_logger = None
+        self.stats = None
 
         self.reset()
 
@@ -239,15 +240,15 @@ class ApiState(object):
         self._root_logger = logging.getLogger()
         self._root_logger.addHandler(_WebAPILogHandler(self.state))
 
-    def check_subprocess_startup_timeout(self):
-        if self.subprocess_running:
-            return True
+    def check_if_startup_timeout_elapsed(self):
+        if self.subprocess_running or self.in_resolved_state:
+            return False
 
         now = time.time()
         if self.started_timestamp is None:
             self.started_timestamp = now
 
-        return (now - self.started_timestamp) < _SUBPROCESS_STARTUP_TIME_LIMIT
+        return (now - self.started_timestamp) > _SUBPROCESS_STARTUP_TIME_LIMIT
 
     def check_if_cleanup_grace_period_elapsed(self):
         if self.resolved_timestamp is None:
@@ -295,6 +296,10 @@ class ApiState(object):
     def in_resolved_state(self):
         return self.model_state in {COMPLETE, FAILED, TERMINATED}
 
+    @property
+    def is_subprocess_prematurely_terminated(self):
+        return (self.process is not None) and not self.process.is_alive() and not self.in_resolved_state
+
 
 app = Flask(__name__)
 
@@ -304,25 +309,51 @@ logger = logging.getLogger('WebAPI')
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
 
 
-def _get_state():
-    stats = None
+def _poll_model_status():
+    try:
+        if None not in (api_state.process, api_state.receiver):
+            while api_state.receiver.poll():
+                update = api_state.receiver.recv()
+                api_state.state.setdefault('log', []).extend(update.pop('log', []))
+                api_state.state.update(update)
+    except EOFError:
+        pass  # This is "normal", occurs when IPC pipe is closed.
 
+
+def _poll_model():
+    _poll_model_status()
+
+    # Obtain model execution stats on a best-effort basis.
     if api_state.subprocess_running:
         # noinspection PyBroadException
         try:
-            stats = {
+            api_state.stats = {
                 'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
             }
         except Exception:
-            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
-    elif api_state.subprocess_starting:
-        pass
-    elif not api_state.in_resolved_state:
+            pass
+
+    # Check for failed startup.
+    if api_state.check_if_startup_timeout_elapsed():
+        api_state.fail_with_exception(
+            'Model startup timeout elapsed',
+            'Model startup timeout ({} seconds) elapsed before model execution began'.format(
+                _SUBPROCESS_STARTUP_TIME_LIMIT
+            ),
+            {}
+        )
+
+        return
+
+    # Check for premature subprocess termination.
+    if api_state.is_subprocess_prematurely_terminated:
         if api_state.subprocess_starting:
             message = 'Model failed to start.'
         else:
             logger.critical('Model terminated prematurely, waiting {} seconds for process cleanup')
             api_state.process.join(_ABNORMAL_TERMINATION_TIMEOUT_SEC)
+
+            _poll_model_status()  # Get any last-minute status updates from the model.
 
             exit_code = api_state.process.exitcode
             exit_description = 'unknown' if exit_code is None else exit_code
@@ -334,14 +365,11 @@ def _get_state():
             {'exitCode': api_state.process.exitcode}
         )
 
-    try:
-        if None not in (api_state.process, api_state.receiver):
-            while api_state.receiver.poll():
-                update = api_state.receiver.recv()
-                api_state.state.setdefault('log', []).extend(update.pop('log', []))
-                api_state.state.update(update)
-    except EOFError:
-        pass  # Normal, occurs when IPC pipe is closed.
+        return
+
+
+def _get_state():
+    _poll_model()
 
     ret_val = copy.deepcopy(api_state.state)
 
@@ -354,9 +382,12 @@ def _get_state():
             del api_state.state['log'][0]
 
     ret_val['api_version'] = __version__
-    ret_val['stats'] = stats
+
+    if api_state.stats is not None:
+        ret_val['stats'] = api_state.stats
 
     return ret_val
+
 
 def terminate(timeout=0.0):
     if api_state.process is None:
