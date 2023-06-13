@@ -19,7 +19,7 @@ from xarray import Variable
 from xarray.core import indexing
 from xarray.core.pycompat import integer_types
 from xarray.core.utils import Frozen, is_dict_like
-from xarray.backends.common import AbstractDataStore, BackendArray
+from xarray.backends.common import AbstractDataStore, BackendArray, robust_getitem
 
 # LazilyOuterIndexedArray and FrozenOrderedDict renamed in later versions of xarray.
 try:
@@ -33,29 +33,34 @@ except ImportError:
     from xarray.core.utils import FrozenOrderedDict as FrozenDict
 
 
+retry_connection_errors = {ConnectionError, StopIteration, TimeoutError, IndexError}
+
 class PydapArrayWrapper(BackendArray):
     def __init__(self, array):
         self.array = array
 
     @property
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def shape(self):
         return self.array.shape
 
     @property
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def dtype(self):
         return self.array.dtype
 
     def __getitem__(self, key):
         return indexing.explicit_indexing_adapter(key, self.shape, indexing.IndexingSupport.BASIC, self._getitem)
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def _getitem(self, key):
-        result = self.array[key]
-
+        # pull the data from the array attribute if possible, to avoid
+        # downloading coordinate data twice
+        array = getattr(self.array, "array", self.array)
+        result = robust_getitem(array, key, catch=ValueError)
+        # in some cases, pydap doesn't squeeze axes automatically like numpy
         axis = tuple(n for n, k in enumerate(key) if isinstance(k, integer_types))
-        if len(axis) > 0:
+        if result.ndim + len(axis) != array.ndim and axis:
             result = np.squeeze(result, axis)
 
         return result
@@ -88,23 +93,23 @@ class PydapDataStore(AbstractDataStore):
         return PydapDataStore.open(dataset.opendap.url, dataset.client.session)
 
     @classmethod
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open(cls, url, session=None):
         return cls(pydap.client.open_url(url, session=session))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open_store_variable(self, var):
         data = LazilyIndexedArray(PydapArrayWrapper(var))
         return Variable(var.dimensions, data, _fix_attributes(var.attributes))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_variables(self):
         return FrozenDict((k, self.open_store_variable(self.ds[k])) for k in self.ds.keys())
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_attrs(self):
         return Frozen(_fix_attributes(self.ds.attributes))
 
-    @retry(retryable_methods=ANY)
+    @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def get_dimensions(self):
         return Frozen(self.ds.dimensions)

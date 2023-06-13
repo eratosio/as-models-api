@@ -1,5 +1,10 @@
+import inspect
 
-from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT
+from senaps_sensor.error import SenapsError
+
+from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT, _Retryable, \
+    RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, \
+    _default_retryable_connection_errors
 from datetime import datetime, timedelta
 import json
 import httpretty
@@ -29,7 +34,11 @@ class MockJsonResource:
         httpretty.register_uri(httpretty.GET, url, body=self)
 
     def add_response(self, status, headers, body):
-        self._responses.append((status, headers, json.dumps(body)))
+        if isinstance(body, dict):
+            body_ = json.dumps(body)
+        else:
+            body_ = body
+        self._responses.append((status, headers, body_))
         return status, headers, body
 
     @property
@@ -41,17 +50,54 @@ class MockJsonResource:
         return len(httpretty.latest_requests())
 
     def __call__(self, request, uri, response_headers):
-        return self._responses[self.request_count - 1]
+
+        response = self._responses[self.request_count - 1]
+
+        if inspect.isclass(response[2]) and issubclass(response[2], BaseException):
+            raise response[2]('mock exception')
+
+        return response
 
 
 class RetriesTests(unittest.TestCase):
     RETRY_STRATEGY = Retry(
         total=9,
         status_forcelist=[429, 500, 502, 503, 504],
-        method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+        allowed_methods=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
         backoff_factor=1
     )
     HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
+
+    @httpretty.activate
+    def test_retry_decorator_connection_error(self):
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(None, None, ConnectionResetError)
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        @retry
+        def make_request():
+            response_ = requests.get(resource.url)
+            response_.raise_for_status()
+            return response_
+
+        response = make_request()
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, response.json())
+        self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_retry_decorator_sensor_client_error(self):
+
+        def make_request():
+            raise SenapsError("Failed to send request: %s" % ConnectionAbortedError(ConnectionResetError()))
+
+        retryable = _Retryable(make_request, 2, ANY, RETRYABLE_STATUSES, DEFAULT_BACKOFF_STRATEGY, DEFAULT_CONNECTION_ERROR_BACKOFF_STRATEGY, _default_retryable_connection_errors)
+
+        with self.assertRaises(SenapsError):
+            retryable()
+
+        self.assertEqual(retryable._request_count, 3)
+
 
     @httpretty.activate
     def test_retry_decorator_when_rate_limited(self):
@@ -92,6 +138,21 @@ class RetriesTests(unittest.TestCase):
         self.assertEqual(2, resource.request_count)
 
     @httpretty.activate
+    def test_retry_adapter_connection_error(self):
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(None, None, ConnectionResetError)
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        session = requests.Session()
+        session.mount('http://', RetriesTests.HTTP_ADAPTER)
+
+        response = session.get(resource.url)
+
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, response.json())
+        self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
     def test_http_adapter_when_rate_limited(self):
         resource = MockJsonResource('http://senaps.io/api/test')
         resource.add_response(429, {'Retry-After': '1'}, {'status': 'rate limited'})
@@ -105,6 +166,25 @@ class RetriesTests(unittest.TestCase):
         self.assertEqual(expected_status, response.status_code)
         self.assertEqual(expected_body, response.json())
         self.assertEqual(2, resource.request_count)
+
+    @httpretty.activate
+    def test_retry_decorator_connection_error_with_webob(self):
+        resource = MockJsonResource('http://senaps.io/api/test')
+        resource.add_response(None, None, ConnectionResetError)
+        expected_status, _, expected_body = resource.add_response(200, {}, {'status': 'succeeded'})
+
+        @retry(retryable_methods=ANY)  # NOTE: ANY required for WebOb, since request method is not retained.
+        def make_request():
+            response_ = Request.blank(resource.url).get_response()
+            response_.decode_content()
+            _webob_raise_for_status(response_)
+            return response_
+
+        response = make_request()
+        self.assertEqual(expected_status, response.status_code)
+        self.assertEqual(expected_body, json.loads(response.text))
+        self.assertEqual(2, resource.request_count)
+
 
     @httpretty.activate
     def test_decorator_with_webob(self):
