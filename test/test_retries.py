@@ -63,7 +63,7 @@ class RetriesTests(unittest.TestCase):
     RETRY_STRATEGY = Retry(
         total=9,
         status_forcelist=[429, 500, 502, 503, 504],
-        method_whitelist=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
+        allowed_methods=['HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'],
         backoff_factor=1
     )
     HTTP_ADAPTER = HTTPAdapter(max_retries=RETRY_STRATEGY)
