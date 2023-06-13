@@ -228,11 +228,13 @@ class ApiState(object):
         self.resolved_timestamp = None
         self._root_logger = None
         self.stats = None
+        self.subprocess_ever_ran = False
 
         self.reset()
 
     def reset(self):
         self.process = self.receiver = self.model_id = self.started_timestamp = self.resolved_timestamp = None
+        self.subprocess_ever_ran = False
 
         self.state = {'state': PENDING}
         self.model_complete = multiprocessing.Value('i', 0)
@@ -240,21 +242,83 @@ class ApiState(object):
         self._root_logger = logging.getLogger()
         self._root_logger.addHandler(_WebAPILogHandler(self.state))
 
-    def check_if_startup_timeout_elapsed(self):
-        if self.subprocess_running or self.in_resolved_state:
-            return False
+    def poll(self):
+        self.poll_model_status()
+        self.record_statistics()
+        self.check_for_startup_timeout()
+        self.check_for_subprocess_termination()
+
+    def poll_model_status(self):
+        try:
+            while (self.receiver is not None) and self.receiver.poll():
+                update = self.receiver.recv()
+                self.state.setdefault('log', []).extend(update.pop('log', []))
+                self.state.update(update)
+        except EOFError:
+            pass  # This is "normal", occurs when IPC pipe is closed.
+
+    def check_for_startup_timeout(self):
+        if self.model_state != PENDING:  # We've successfully started up
+            return
 
         now = time.time()
         if self.started_timestamp is None:
             self.started_timestamp = now
 
-        return (now - self.started_timestamp) > _SUBPROCESS_STARTUP_TIME_LIMIT
+        if (now - self.started_timestamp) > _SUBPROCESS_STARTUP_TIME_LIMIT:
+            self.fail_with_exception(
+                'Model startup timeout elapsed',
+                'Model startup timeout ({} seconds) elapsed before model execution began'.format(
+                    _SUBPROCESS_STARTUP_TIME_LIMIT
+                ),
+                {}
+            )
 
-    def check_if_cleanup_grace_period_elapsed(self):
+    def check_for_subprocess_termination(self):
+        if (self.process is None) or self.subprocess_running or not self.subprocess_ever_ran:
+            return
+
+        # At this point, the subprocess has run at some point but is no longer running. Check for any status updates
+        # queued on the IPC pipe before it died.
+        self.poll_model_status()
+
+        # If final success/failure state reached, we're all good.
+        if self.in_resolved_state:
+            return
+
+        # If not, allow a short grace period for any last-gasp status updates to become available on the pipe.
+        now = time.time()
         if self.resolved_timestamp is None:
-            return False
+            self.resolved_timestamp = now
+        if (now - self.resolved_timestamp) < _MODEL_RESOLUTION_GRACE_PERIOD_SEC:
+            return  # Grace period not elapsed - don't proceed any further, for now.
 
-        return (time.time() - self.resolved_timestamp) > _MODEL_RESOLUTION_GRACE_PERIOD_SEC
+        # Grace period has elapsed without any final state from the model. This suggests it failed prematurely, possibly
+        # due to a segfault or other such issue. Attempt to clean up.
+        logger.critical('Model terminated prematurely, waiting {} seconds for process cleanup'.format(
+            _ABNORMAL_TERMINATION_TIMEOUT_SEC
+        ))
+        self.process.join(_ABNORMAL_TERMINATION_TIMEOUT_SEC)
+
+        exit_code = self.process.exitcode
+        exit_description = 'unknown exit code' if exit_code is None else 'exit code {}'.format(exit_code)
+        self.fail_with_exception(
+            'Model terminated prematurely',
+            'Model terminated prematurely, with {}.'.format(exit_description),
+            {'exitCode': exit_code}
+        )
+
+    def record_statistics(self):
+        if not self.subprocess_running:
+            return
+
+        # noinspection PyBroadException
+        try:
+            self.stats = {
+                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
+            }
+        except Exception:
+            pass  # Stats obtained on best-effort basis, don't allow this to cause wider failure.
 
     def fail_with_exception(self, message, dev_message, data):
         self.state['state'] = FAILED
@@ -281,24 +345,17 @@ class ApiState(object):
                 self.resolved_timestamp = time.time()
 
     @property
-    def subprocess_starting(self):
-        return (self.process is not None) and not self.process.is_alive() and (self.model_state == PENDING)
-
-    @property
     def subprocess_running(self):
-        return (self.process is not None) and self.process.is_alive()
+        if self.process is None:
+            return False
 
-    @property
-    def model_running(self):
-        return self.subprocess_running and not self.in_resolved_state
+        running = self.process.is_alive()
+        self.subprocess_ever_ran = self.subprocess_ever_ran or running
+        return running
 
     @property
     def in_resolved_state(self):
         return self.model_state in {COMPLETE, FAILED, TERMINATED}
-
-    @property
-    def is_subprocess_prematurely_terminated(self):
-        return (self.process is not None) and not self.process.is_alive() and not self.in_resolved_state
 
 
 app = Flask(__name__)
@@ -309,67 +366,8 @@ logger = logging.getLogger('WebAPI')
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask HTTP request logs
 
 
-def _poll_model_status():
-    try:
-        if None not in (api_state.process, api_state.receiver):
-            while api_state.receiver.poll():
-                update = api_state.receiver.recv()
-                api_state.state.setdefault('log', []).extend(update.pop('log', []))
-                api_state.state.update(update)
-    except EOFError:
-        pass  # This is "normal", occurs when IPC pipe is closed.
-
-
-def _poll_model():
-    _poll_model_status()
-
-    # Obtain model execution stats on a best-effort basis.
-    if api_state.subprocess_running:
-        # noinspection PyBroadException
-        try:
-            api_state.stats = {
-                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
-            }
-        except Exception:
-            pass
-
-    # Check for failed startup.
-    if api_state.check_if_startup_timeout_elapsed():
-        api_state.fail_with_exception(
-            'Model startup timeout elapsed',
-            'Model startup timeout ({} seconds) elapsed before model execution began'.format(
-                _SUBPROCESS_STARTUP_TIME_LIMIT
-            ),
-            {}
-        )
-
-        return
-
-    # Check for premature subprocess termination.
-    if api_state.is_subprocess_prematurely_terminated:
-        if api_state.subprocess_starting:
-            message = 'Model failed to start.'
-        else:
-            logger.critical('Model terminated prematurely, waiting {} seconds for process cleanup')
-            api_state.process.join(_ABNORMAL_TERMINATION_TIMEOUT_SEC)
-
-            _poll_model_status()  # Get any last-minute status updates from the model.
-
-            exit_code = api_state.process.exitcode
-            exit_description = 'unknown' if exit_code is None else exit_code
-            message = 'Model terminated prematurely (exit code {}).'.format(exit_description)
-
-        api_state.fail_with_exception(
-            message,
-            'Model "{}" terminated with exit code {}.'.format(api_state.model_id, api_state.process.exitcode),
-            {'exitCode': api_state.process.exitcode}
-        )
-
-        return
-
-
 def _get_state():
-    _poll_model()
+    api_state.poll()
 
     ret_val = copy.deepcopy(api_state.state)
 
