@@ -1,5 +1,6 @@
 
 import json
+import time
 
 from as_models.manifest import Manifest
 from as_models.web_api import _load_runtime
@@ -318,6 +319,34 @@ class HostTests(unittest.TestCase):
             self.assertTrue(any(
                 (log['level'] == 'CRITICAL') and ('something went wrong' in log['message']) for log in self._all_logs
             ), 'Expecting CRITICAL log message.')
+
+
+class EdgeCaseTests(unittest.TestCase):
+    def test_slow_poll_does_not_cause_abnormal_termination_error(self):
+        with TestModel(8000, 'python') as model:
+            messages = []
+
+            # Send job start request.
+            response = model.start({'modelId': 'noop'})
+            messages += [entry["message"] for entry in response.get('log', [])]
+
+            # Wait 10 sec before polling model. This should be sufficient for it to complete, and for the model process
+            # to terminate naturally.
+            time.sleep(10.0)
+
+            # Poll model, should be in COMPLETE state.
+            response = model.poll()
+            messages += [entry["message"] for entry in response.get('log', [])]
+            self.assertEqual('COMPLETE', response['state'])
+
+            # Wait another 10 seconds before terminating model. Should still be in COMPLETE state.
+            time.sleep(10.0)
+            response = model.terminate(5.0)
+            messages += [entry["message"] for entry in response.get('log', [])]
+            self.assertEqual('COMPLETE', response['state'])
+
+            # None of the log messages should indicate abnormal termination.
+            self.assertFalse(any(('terminated abnormally' in msg) for msg in messages))
 
 
 if __name__ == "__main__":
