@@ -20,6 +20,7 @@ from xarray.core import indexing
 from xarray.core.pycompat import integer_types
 from xarray.core.utils import Frozen, is_dict_like
 from xarray.backends.common import AbstractDataStore, BackendArray, robust_getitem
+from webob.exc import HTTPError
 
 # LazilyOuterIndexedArray and FrozenOrderedDict renamed in later versions of xarray.
 try:
@@ -34,6 +35,19 @@ except ImportError:
 
 
 retry_connection_errors = {ConnectionError, StopIteration, TimeoutError, IndexError}
+
+def raise_for_status_patched(response):
+    # Raise error if status is above 300:
+    if response.status_code >= 300:
+        raise HTTPError(
+            detail=response.status+'\n'+response.text,
+            status_code=response.status_code,
+            code=response.status_code,
+            headers=response.headers,
+            comment=response.body
+        )
+
+pydap.handlers.dap.raise_for_status = raise_for_status_patched
 
 # Monkey patch Pydap to stop it from doing HEAD requests.
 pydap.net.create_request_from_session = create_request_from_session_patched
