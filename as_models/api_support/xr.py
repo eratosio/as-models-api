@@ -113,7 +113,7 @@ class PydapDataStore(AbstractDataStore):
     @classmethod
     @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open(cls, url, session=None):
-        return cls(pydap.client.open_url(url, session=session))
+        return cls(pydap.client.open_url(url, session=session, timeout=900))
 
     @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open_store_variable(self, var):
