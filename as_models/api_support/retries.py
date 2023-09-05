@@ -24,9 +24,9 @@ GMT = _GMT()
 RFC_7231_TIMESTAMP_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
 
 # Default retry parameters.
-RETRIES = 10
+RETRIES = 20
 RETRYABLE_METHODS = {'HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'}
-RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+RETRYABLE_STATUSES = {429, 500, 502, 503, 504, 403}
 
 _default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead}
 
