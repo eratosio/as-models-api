@@ -3,6 +3,7 @@ git+https://bitbucket.csiro.au/scm/sc/tds-client-python.git@v1.2.0#egg=tds_clien
 git+https://bitbucket.csiro.au/scm/sc/tdm-client-python.git@v2.31.3#egg=tdm
 git+https://bitbucket.csiro.au/scm/sc/as-client-python.git@v2.21.0#egg=as_client
 flask==2.2.3	# beware: python 3.7+!!!
+Werkzeug>=2.2.2,<3.0.0 # Note Flask 2.2.3 does not support Werkzeug greater than 2.3.7, but doesn't constrain this in its setup.py
 # MarkupSafe>0.23,<=2.0.1 # should not be required to specify this, let flask bring it in.
 enum34==1.1.10
 requests>=2.22.0,<3.0.0
