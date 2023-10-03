@@ -149,7 +149,7 @@ class _JobProcess(object):
         if tb is not None:
             # it should only be able to be None if another exception is raised on this thread
             # or someone invoked exc_clear prior to us consuming it.
-            developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
+            developer_msg = ''.join(traceback.format_exception(type(exc), value=exc, tb=tb))
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         msg = exc.msg if type(exc) == SenapsModelError else str(exc)
         self._sender.send({
@@ -406,12 +406,14 @@ def terminate(timeout=0.0):
         api_state.model_state = TERMINATED
 
     # Make best-effort attempt to stop the web API.
-    # TODO: 2023-03-06: this development shutdown hook is NOT available any longer. We need an alternative way to make tests work nicely.
     func = request.environ.get('werkzeug.server.shutdown')
+
+    # support deprecated werkzeug.server.shutdown if available.
     if callable(func):
         func()
-    else:
-        logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+
+    # 2023-03-06: werkzeug.server.shutdown development shutdown hook is NOT available any longer. We need an alternative way to make tests work nicely.
+    # if running in development/test context, use atexit instead to clean up resources etc - https://docs.python.org/3/library/atexit.html
 
 
 def _get_traceback(exc):
