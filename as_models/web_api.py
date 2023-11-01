@@ -29,7 +29,13 @@ from .version import __version__
 
 _SENTINEL = Sentinel()
 _SUBPROCESS_STARTUP_TIME_LIMIT = 30.0  # seconds
-_ABNORMAL_TERMINATION_GRACE_PERIOD = 5.0  # seconds
+
+# Allow a short grace period between a model completing execution and forcibly terminating its subprocess, to allow for
+# last-minute status updates to be pulled off the IPC pipe.
+_MODEL_RESOLUTION_GRACE_PERIOD_SEC = 5.0
+
+# If model terminates prematurely, limit how long we'll wait for process cleanup.
+_ABNORMAL_TERMINATION_TIMEOUT_SEC = 5.0  # seconds
 
 
 logging.captureWarnings(True)
@@ -143,7 +149,7 @@ class _JobProcess(object):
         if tb is not None:
             # it should only be able to be None if another exception is raised on this thread
             # or someone invoked exc_clear prior to us consuming it.
-            developer_msg = ''.join(traceback.format_exception(etype=type(exc), value=exc, tb=tb))
+            developer_msg = ''.join(traceback.format_exception(type(exc), value=exc, tb=tb))
         user_data = sanitize_dict_for_json(exc.user_data) if type(exc) == SenapsModelError else None
         msg = exc.msg if type(exc) == SenapsModelError else str(exc)
         self._sender.send({
@@ -219,13 +225,16 @@ class ApiState(object):
         self.state = None
         self.model_complete = None
         self.started_timestamp = None
-        self.failed_timestamp = None
+        self.resolved_timestamp = None
         self._root_logger = None
+        self.stats = None
+        self.subprocess_ever_ran = False
 
         self.reset()
 
     def reset(self):
-        self.process = self.receiver = self.model_id = self.started_timestamp = self.failed_timestamp = None
+        self.process = self.receiver = self.model_id = self.started_timestamp = self.resolved_timestamp = None
+        self.subprocess_ever_ran = False
 
         self.state = {'state': PENDING}
         self.model_complete = multiprocessing.Value('i', 0)
@@ -233,22 +242,83 @@ class ApiState(object):
         self._root_logger = logging.getLogger()
         self._root_logger.addHandler(_WebAPILogHandler(self.state))
 
-    def check_subprocess_startup_timeout(self):
-        if self.subprocess_running:
-            return True
+    def poll(self):
+        self.poll_model_status()
+        self.record_statistics()
+        self.check_for_startup_timeout()
+        self.check_for_subprocess_termination()
+
+    def poll_model_status(self):
+        try:
+            while (self.receiver is not None) and self.receiver.poll():
+                update = self.receiver.recv()
+                self.state.setdefault('log', []).extend(update.pop('log', []))
+                self.state.update(update)
+        except EOFError:
+            pass  # This is "normal", occurs when IPC pipe is closed.
+
+    def check_for_startup_timeout(self):
+        if self.model_state != PENDING:  # We've successfully started up
+            return
 
         now = time.time()
         if self.started_timestamp is None:
             self.started_timestamp = now
 
-        return (now - self.started_timestamp) < _SUBPROCESS_STARTUP_TIME_LIMIT
+        if (now - self.started_timestamp) > _SUBPROCESS_STARTUP_TIME_LIMIT:
+            self.fail_with_exception(
+                'Model startup timeout elapsed',
+                'Model startup timeout ({} seconds) elapsed before model execution began'.format(
+                    _SUBPROCESS_STARTUP_TIME_LIMIT
+                ),
+                {}
+            )
 
-    def check_failure_cleanup_timeout(self):
+    def check_for_subprocess_termination(self):
+        if (self.process is None) or self.subprocess_running or not self.subprocess_ever_ran:
+            return
+
+        # At this point, the subprocess has run at some point but is no longer running. Check for any status updates
+        # queued on the IPC pipe before it died.
+        self.poll_model_status()
+
+        # If final success/failure state reached, we're all good.
+        if self.in_resolved_state:
+            return
+
+        # If not, allow a short grace period for any last-gasp status updates to become available on the pipe.
         now = time.time()
-        if self.failed_timestamp is None:
-            self.failed_timestamp = now
+        if self.resolved_timestamp is None:
+            self.resolved_timestamp = now
+        if (now - self.resolved_timestamp) < _MODEL_RESOLUTION_GRACE_PERIOD_SEC:
+            return  # Grace period not elapsed - don't proceed any further, for now.
 
-        return (now - self.failed_timestamp) < _ABNORMAL_TERMINATION_GRACE_PERIOD
+        # Grace period has elapsed without any final state from the model. This suggests it failed prematurely, possibly
+        # due to a segfault or other such issue. Attempt to clean up.
+        logger.critical('Model terminated prematurely, waiting {} seconds for process cleanup'.format(
+            _ABNORMAL_TERMINATION_TIMEOUT_SEC
+        ))
+        self.process.join(_ABNORMAL_TERMINATION_TIMEOUT_SEC)
+
+        exit_code = self.process.exitcode
+        exit_description = 'unknown exit code' if exit_code is None else 'exit code {}'.format(exit_code)
+        self.fail_with_exception(
+            'Model terminated prematurely',
+            'Model terminated prematurely, with {}.'.format(exit_description),
+            {'exitCode': exit_code}
+        )
+
+    def record_statistics(self):
+        if not self.subprocess_running:
+            return
+
+        # noinspection PyBroadException
+        try:
+            self.stats = {
+                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
+            }
+        except Exception:
+            pass  # Stats obtained on best-effort basis, don't allow this to cause wider failure.
 
     def fail_with_exception(self, message, dev_message, data):
         self.state['state'] = FAILED
@@ -268,19 +338,24 @@ class ApiState(object):
 
     @model_state.setter
     def model_state(self, state):
-        self.state['state'] = state
+        if not self.in_resolved_state:
+            self.state['state'] = state
 
-    @property
-    def subprocess_starting(self):
-        return (self.process is not None) and not self.process.is_alive() and (self.model_state == PENDING)
+            if self.in_resolved_state and self.resolved_timestamp is None:
+                self.resolved_timestamp = time.time()
 
     @property
     def subprocess_running(self):
-        return (self.process is not None) and self.process.is_alive()
+        if self.process is None:
+            return False
+
+        running = self.process.is_alive()
+        self.subprocess_ever_ran = self.subprocess_ever_ran or running
+        return running
 
     @property
-    def model_running(self):
-        return self.subprocess_running and (self.model_state not in (COMPLETE, FAILED, TERMINATED))
+    def in_resolved_state(self):
+        return self.model_state in {COMPLETE, FAILED, TERMINATED}
 
 
 app = Flask(__name__)
@@ -292,20 +367,10 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)  # disable unwanted Flask 
 
 
 def _get_state():
-    state = api_state.model_state
-
-    if (None not in (api_state.process, api_state.receiver)) and (state in (None, PENDING, RUNNING)):
-        try:
-            while api_state.receiver.poll():
-                update = api_state.receiver.recv()
-                api_state.state.setdefault('log', []).extend(update.pop('log', []))
-                api_state.state.update(update)
-        except EOFError as e:
-            print(e)  # TODO: handle better
-
-    _check_for_abnormal_termination()
+    api_state.poll()
 
     ret_val = copy.deepcopy(api_state.state)
+
     # CPS-952: purge old log messages.
     if 'log' in api_state.state:
         purge_count = len(api_state.state['log'])
@@ -316,45 +381,10 @@ def _get_state():
 
     ret_val['api_version'] = __version__
 
-    if api_state.subprocess_running:
-        # noinspection PyBroadException
-        try:
-            ret_val['stats'] = {
-                'peakMemoryUsage': get_peak_memory_usage(api_state.process.pid)
-            }
-        except Exception:
-            pass  # Only make a best-effort attempt to get stats. Don't let it kill the API.
+    if api_state.stats is not None:
+        ret_val['stats'] = api_state.stats
 
     return ret_val
-
-
-def _check_for_abnormal_termination():
-    # No need to worry if the model is running, or if it's still starting and the startup timeout hasn't elapsed.
-    if api_state.subprocess_running and api_state.check_subprocess_startup_timeout():
-        api_state.failed_timestamp = None
-        return
-
-    # Continue running for a moment to allow any pending messages from the model to come through the IPC pipe.
-    if api_state.check_failure_cleanup_timeout():
-        return
-
-    # At this point, the model must have started or terminated abnormally and the grace period elapsed. Attempt to clean
-    # up the defunct process.
-    failure_mode = 'failed to start' if api_state.subprocess_starting else 'terminated abnormally'
-    message = 'Model "{}" {}.'.format(api_state.model_id, failure_mode)
-    logger.critical('{} Waiting {} seconds for process cleanup.'.format(message, _ABNORMAL_TERMINATION_GRACE_PERIOD))
-    api_state.process.join(_ABNORMAL_TERMINATION_GRACE_PERIOD)
-
-    if api_state.process.exitcode is None:
-        logger.error('Failed to clean up model process.')
-    elif api_state.process.exitcode < 0:
-        logger.info('Process successfully cleaned up, exit code was {}.'.format(api_state.process.exitcode))
-
-    api_state.fail_with_exception(
-        message,
-        'Model "{}" terminated with exit code {}.'.format(api_state.model_id, api_state.process.exitcode),
-        {'exitCode': api_state.process.exitcode}
-    )
 
 
 def terminate(timeout=0.0):
@@ -376,12 +406,14 @@ def terminate(timeout=0.0):
         api_state.model_state = TERMINATED
 
     # Make best-effort attempt to stop the web API.
-    # TODO: 2023-03-06: this development shutdown hook is NOT available any longer. We need an alternative way to make tests work nicely.
     func = request.environ.get('werkzeug.server.shutdown')
+
+    # support deprecated werkzeug.server.shutdown if available.
     if callable(func):
         func()
-    else:
-        logger.warning('Unable to terminate model API (shutdown hook unavailable).')
+
+    # 2023-03-06: werkzeug.server.shutdown development shutdown hook is NOT available any longer. We need an alternative way to make tests work nicely.
+    # if running in development/test context, use atexit instead to clean up resources etc - https://docs.python.org/3/library/atexit.html
 
 
 def _get_traceback(exc):
