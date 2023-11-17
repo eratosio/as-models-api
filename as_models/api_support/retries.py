@@ -3,6 +3,8 @@ import random
 from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
+from http.client import IncompleteRead
+
 from requests.packages.urllib3.util.retry import Retry as _Retry
 import time
 
@@ -26,7 +28,7 @@ RETRIES = 10
 RETRYABLE_METHODS = {'HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'}
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
-_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError}
+_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead}
 
 
 ANY = 'any'
