@@ -10,7 +10,7 @@ NOTES:
       to configure the retry decorator to retry on ANY request method. This should be safe, since PyDAP should only ever
       be making HEAD and GET requests anyway.
 """
-
+from .pydap_patches import create_request_from_session_patched
 from .retries import ANY, retry
 
 import numpy as np
@@ -20,6 +20,7 @@ from xarray.core import indexing
 from xarray.core.pycompat import integer_types
 from xarray.core.utils import Frozen, is_dict_like
 from xarray.backends.common import AbstractDataStore, BackendArray, robust_getitem
+from webob.exc import HTTPError
 
 # LazilyOuterIndexedArray and FrozenOrderedDict renamed in later versions of xarray.
 try:
@@ -34,6 +35,23 @@ except ImportError:
 
 
 retry_connection_errors = {ConnectionError, StopIteration, TimeoutError, IndexError}
+
+def raise_for_status_patched(response):
+    # Raise error if status is above 300:
+    if response.status_code >= 300:
+        raise HTTPError(
+            detail=response.status+'\n'+response.text,
+            status_code=response.status_code,
+            code=response.status_code,
+            headers=response.headers,
+            comment=response.body
+        )
+
+pydap.handlers.dap.raise_for_status = raise_for_status_patched
+
+# Monkey patch Pydap to stop it from doing HEAD requests.
+pydap.net.create_request_from_session = create_request_from_session_patched
+
 
 class PydapArrayWrapper(BackendArray):
     def __init__(self, array):
@@ -58,6 +76,7 @@ class PydapArrayWrapper(BackendArray):
         # downloading coordinate data twice
         array = getattr(self.array, "array", self.array)
         result = robust_getitem(array, key, catch=ValueError)
+        result = np.asarray(result)
         # in some cases, pydap doesn't squeeze axes automatically like numpy
         axis = tuple(n for n, k in enumerate(key) if isinstance(k, integer_types))
         if result.ndim + len(axis) != array.ndim and axis:
@@ -95,7 +114,7 @@ class PydapDataStore(AbstractDataStore):
     @classmethod
     @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open(cls, url, session=None):
-        return cls(pydap.client.open_url(url, session=session))
+        return cls(pydap.client.open_url(url, session=session, timeout=900))
 
     @retry(retryable_methods=ANY, retryable_connection_errors=retry_connection_errors)
     def open_store_variable(self, var):

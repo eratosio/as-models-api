@@ -24,7 +24,8 @@ setup(
     packages=find_packages(),
     long_description=read('readme.md'),
     install_requires=[
-        'flask==2.2.3'
+        'flask==2.2.3',
+        'Werkzeug>=2.2.2,<3.0.0' # Note Flask 2.2.3 does not support Werkzeug greater than 2.3.7, but doesn't constrain this in its setup.py
     ],
     test_requires=[
         'httpretty==1.1.4',
