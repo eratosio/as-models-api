@@ -1,5 +1,6 @@
 import inspect
 
+from requests import ConnectTimeout
 from senaps_sensor.error import SenapsError
 
 from as_models.api_support.retries import ANY, GMT, retry, Retry, RFC_7231_TIMESTAMP_FORMAT, _Retryable, \
@@ -263,3 +264,18 @@ class RetriesTests(unittest.TestCase):
         self.assertEqual(expected_status, response.status_code)
         self.assertEqual(expected_body, response.json())
         self.assertEqual(2, resource.request_count)
+
+    def test_connect_timeout_retry(self):
+        attempts = 0
+
+        @retry(retries=2)
+        def make_request():
+            nonlocal attempts
+            attempts += 1
+            # make request to non routable address
+            response = requests.get('http://10.255.255.1', timeout=1)
+
+        with(self.assertRaisesRegex(ConnectTimeout, '.*')):
+            make_request()
+
+        self.assertEqual(attempts, 3)
