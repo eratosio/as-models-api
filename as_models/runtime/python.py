@@ -8,7 +8,7 @@ from tds_client.catalog import Catalog
 from tds_client.catalog.search import QuickSearchStrategy
 from tds_client.util import urls
 
-from api_support import retry
+from ..api_support.retries import retry
 from .. import models
 from ..context import BaseContext
 from ..ports import (STREAM_PORT, MULTISTREAM_PORT, DOCUMENT_PORT, GRID_PORT, STREAM_COLLECTION_PORT,
