@@ -1,4 +1,5 @@
 import inspect
+import ssl
 
 from requests import ConnectTimeout
 from senaps_sensor.error import SenapsError
@@ -276,6 +277,20 @@ class RetriesTests(unittest.TestCase):
             response = requests.get('http://10.255.255.1', timeout=1)
 
         with(self.assertRaisesRegex(ConnectTimeout, '.*')):
+            make_request()
+
+        self.assertEqual(attempts, 3)
+
+    def test_sslerror_retry(self):
+        attempts = 0
+
+        @retry(retries=2)
+        def make_request():
+            nonlocal attempts
+            attempts += 1
+            raise ssl.SSLError
+
+        with(self.assertRaisesRegex(ssl.SSLError, '.*')):
             make_request()
 
         self.assertEqual(attempts, 3)

@@ -1,5 +1,6 @@
 # coding=utf-8
 import random
+import ssl
 from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
@@ -54,7 +55,7 @@ try:
     _supported_libraries.append('requests')
 
     from requests import ConnectionError, Timeout
-    _default_retryable_connection_errors = _default_retryable_connection_errors | {ConnectionError, Timeout}
+    _default_retryable_connection_errors = _default_retryable_connection_errors | {ConnectionError, Timeout, ssl.SSLError}
 
 except ImportError:
     pass
