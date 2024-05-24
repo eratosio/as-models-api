@@ -29,7 +29,7 @@ RETRIES = 10
 RETRYABLE_METHODS = {'HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'}
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
-_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead}
+_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead, ssl.SSLError}
 
 
 ANY = 'any'
@@ -55,7 +55,7 @@ try:
     _supported_libraries.append('requests')
 
     from requests import ConnectionError, Timeout
-    _default_retryable_connection_errors = _default_retryable_connection_errors | {ConnectionError, Timeout, ssl.SSLError}
+    _default_retryable_connection_errors = _default_retryable_connection_errors | {ConnectionError, Timeout}
 
 except ImportError:
     pass
