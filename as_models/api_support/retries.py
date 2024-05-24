@@ -1,5 +1,6 @@
 # coding=utf-8
 import random
+import ssl
 from datetime import datetime, timedelta, tzinfo
 import functools
 import logging
@@ -28,7 +29,7 @@ RETRIES = 10
 RETRYABLE_METHODS = {'HEAD', 'GET', 'OPTIONS', 'PUT', 'DELETE'}
 RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
-_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead}
+_default_retryable_connection_errors = {ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, IncompleteRead, ssl.SSLError}
 
 
 ANY = 'any'
