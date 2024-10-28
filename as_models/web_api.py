@@ -501,7 +501,7 @@ def _post_root():
     job_process = _JobProcess(model_runtime, args, job_request, sender, logger)
 
     try:
-        mp_context = multiprocessing.get_context('spawn')
+        mp_context = multiprocessing.get_context('fork')
         api_state.process = mp_context.Process(target=job_process)
     except (AttributeError, ValueError):
         # AttributeError if running pre-3.4 Python (and get_context() is therefore unavailable); ValueError if "spawn"
