@@ -4,7 +4,7 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "as_models"
+name = "senaps-asapi"
 requires-python = ">=3.7"
 dynamic = ["version"]
 authors = [{ name = "Mac Coombe", email = "mac.coombe@csiro.au" }]
@@ -15,7 +15,6 @@ dependencies = ["flask==2.2.3", "Werkzeug>=2.2.2,<3.0.0"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Topic :: Scientific/Engineering :: Information Analysis",
-  "License :: OSI Approved :: BSD License",
   "Intended Audience :: Developers",
   "Natural Language :: English",
   "Operating System :: POSIX",
