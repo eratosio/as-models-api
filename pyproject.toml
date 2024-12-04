@@ -1,0 +1,27 @@
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "as_models"
+requires-python = ">=3.7"
+dynamic = ["version"]
+authors = [{ name = "Mac Coombe", email = "mac.coombe@csiro.au" }]
+description = "Analysis Services model integration library."
+keywords = ["models"]
+readme = "readme.md"
+dependencies = ["flask==2.2.3", "Werkzeug>=2.2.2,<3.0.0"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "License :: OSI Approved :: BSD License",
+  "Intended Audience :: Developers",
+  "Natural Language :: English",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3.7+",
+]
+
+[project.optional-dependencies]
+r = ["rpy2==3.3.3"]
+test = ["httpretty==1.1.4", "webob==1.8.7", "xarray==0.18.0", "rpy2==3.3.3"]
