@@ -1,13 +1,14 @@
 
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "senaps-asapi"
+name = "eratos-as-api"
 requires-python = ">=3.7"
 dynamic = ["version"]
 authors = [{ name = "Mac Coombe", email = "mac.coombe@csiro.au" }]
+maintainers = [{ name = "Eratos", email = "support@eratos.com" }]
 description = "Analysis Services model integration library."
 keywords = ["models"]
 readme = "readme.md"
