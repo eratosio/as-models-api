@@ -8,6 +8,7 @@ name = "eratos-as-api"
 requires-python = ">=3.7"
 dynamic = ["version"]
 authors = [{ name = "Mac Coombe", email = "mac.coombe@csiro.au" }]
+license = { text = "MIT License" }
 maintainers = [{ name = "Eratos", email = "support@eratos.com" }]
 description = "Analysis Services model integration library."
 keywords = ["models"]
@@ -17,6 +18,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
   "Natural Language :: English",
   "Operating System :: POSIX",
   "Programming Language :: Python :: 3",
