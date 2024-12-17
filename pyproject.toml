@@ -1,13 +1,14 @@
 
 [build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "as_models"
+name = "eratos-as-api"
 requires-python = ">=3.7"
 dynamic = ["version"]
 authors = [{ name = "Mac Coombe", email = "mac.coombe@csiro.au" }]
+maintainers = [{ name = "Eratos", email = "support@eratos.com" }]
 description = "Analysis Services model integration library."
 keywords = ["models"]
 readme = "readme.md"
@@ -15,7 +16,6 @@ dependencies = ["flask==2.2.3", "Werkzeug>=2.2.2,<3.0.0"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Topic :: Scientific/Engineering :: Information Analysis",
-  "License :: OSI Approved :: BSD License",
   "Intended Audience :: Developers",
   "Natural Language :: English",
   "Operating System :: POSIX",
@@ -28,6 +28,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
 ]
 
+[project.urls]
+Homepage = "https://bitbucket.csiro.au/projects/SC/repos/as-models-api/browse"
+
 [project.optional-dependencies]
 r = ["rpy2==3.3.3"]
 test = ["httpretty==1.1.4", "webob==1.8.7", "xarray==0.18.0", "rpy2==3.3.3"]
+
+[tool.hatch.version]
+path = "as_models/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["as_models"]
