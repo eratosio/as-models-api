@@ -1,6 +1,8 @@
 
 import json
 import os
+import stat
+from pathlib import Path
 
 from . import subprocess
 from .runtime import ModelRuntime
@@ -14,6 +16,16 @@ class MatlabModelRuntime(ModelRuntime):
         return os.path.isfile(self.entrypoint_path) and os.path.splitext(self.entrypoint_path)[1].lower() != '.jar'
 
     def execute_model(self, job_request, args, updater):
+        # Validate matlab binary
+        matlab_binary = Path(self.entrypoint_path).resolve()
+        if not matlab_binary.is_file():
+            raise RuntimeError(f"Matlab binary not found at {matlab_binary}")
+        
+        # Check executable permissions
+        st = matlab_binary.stat()
+        if not (st.st_mode & stat.S_IXUSR):
+            raise RuntimeError(f"Matlab binary at {matlab_binary} is not executable")
+
         # Dump the job request out to file - the Matlab code will read it in later.
         request_file_path = os.path.join(os.getcwd(), MatlabModelRuntime.REQUEST_FILE_NAME)
         with open(request_file_path, 'w') as f:
@@ -23,12 +35,17 @@ class MatlabModelRuntime(ModelRuntime):
         env = dict(os.environ, JOB_REQUEST_PATH=request_file_path, MANIFEST_PATH=self.manifest_path)
 
         # Run the Matlab code using the matlab runtime.
-        updater.update()  # Marks the job as running.
-        command = [self.entrypoint]
+        updater.update()
+        
+        command = [str(matlab_binary), "-nodisplay", "-nosplash", "-nodesktop", "-batch"]
+        
+        if args:
+            command.extend(args)
+
         self.logger.debug('Matlab execution environment: %s', env)
         self.logger.debug('Matlab execution command: %s', command)
         self.logger.info('NOTE: Output from Matlab is prefixed [MATLAB].')
-        exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env)
+        exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env, shell=False)
 
         if exit_code != 0:
             raise RuntimeError("Matlab model process failed with exit code {}.".format(exit_code))
