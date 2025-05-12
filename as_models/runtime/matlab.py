@@ -23,6 +23,7 @@ class MatlabModelRuntime(ModelRuntime):
         
         # Check executable permissions
         st = matlab_binary.stat()
+        self.logger.debug(f"Binary permissions: {stat.filemode(st.st_mode)} ({st.st_mode:o})")
         if not (st.st_mode & stat.S_IXUSR):
             raise RuntimeError(f"Matlab binary at {matlab_binary} is not executable")
 
@@ -38,7 +39,7 @@ class MatlabModelRuntime(ModelRuntime):
         updater.update()
         
         command = [str(matlab_binary), "-nodisplay", "-nosplash", "-nodesktop", "-batch"]
-        
+
         if args:
             command.extend(args)
 
