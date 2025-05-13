@@ -15,17 +15,27 @@ class MatlabModelRuntime(ModelRuntime):
         """Ensure that .jar files are rejected on model upload"""
         return os.path.isfile(self.entrypoint_path) and os.path.splitext(self.entrypoint_path)[1].lower() != '.jar'
 
+    def apply_entrypoint_permissions(self, entrypoint_file: Path):
+        """Ensure that entrypoint file from model has execute permissions"""
+        st = entrypoint_file.stat()
+        self.logger.debug(f"Initial binary permissions: {stat.filemode(st.st_mode)} ({st.st_mode:o})")
+
+        # Ensure binary is executable and update permissions
+        entrypoint_file.chmod(st.st_mode | stat.S_IXUSR)
+        st = entrypoint_file.stat()
+        self.logger.debug(f"Updated binary permissions: {stat.filemode(st.st_mode)} ({st.st_mode:o})")
+       
+        # Still worth keeping in case chmod command fails
+        if not (st.st_mode & stat.S_IXUSR):
+            raise RuntimeError(f"Matlab binary at {entrypoint_file} is not executable")
+
     def execute_model(self, job_request, args, updater):
         # Validate matlab binary
         matlab_binary = Path(self.entrypoint_path).resolve()
         if not matlab_binary.is_file():
             raise RuntimeError(f"Matlab binary not found at {matlab_binary}")
         
-        # Check executable permissions
-        st = matlab_binary.stat()
-        self.logger.debug(f"Binary permissions: {stat.filemode(st.st_mode)} ({st.st_mode:o})")
-        if not (st.st_mode & stat.S_IXUSR):
-            raise RuntimeError(f"Matlab binary at {matlab_binary} is not executable")
+        self.apply_entrypoint_permissions(matlab_binary)
 
         # Dump the job request out to file - the Matlab code will read it in later.
         request_file_path = os.path.join(os.getcwd(), MatlabModelRuntime.REQUEST_FILE_NAME)
@@ -46,7 +56,7 @@ class MatlabModelRuntime(ModelRuntime):
         self.logger.debug('Matlab execution environment: %s', env)
         self.logger.debug('Matlab execution command: %s', command)
         self.logger.info('NOTE: Output from Matlab is prefixed [MATLAB].')
-        exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env, shell=False)
+        exit_code = subprocess.execute(command, updater, log_prefix='[MATLAB] ', env=env)
 
         if exit_code != 0:
             raise RuntimeError("Matlab model process failed with exit code {}.".format(exit_code))
