@@ -33,4 +33,4 @@ The results will be placed in the '/htmlcov' directory.
 
 # Model manifest changes
 
-In `v4.5.0` a optional manifest arg of `runtimeType` has been added.
+In `v4.5.0` a optional manifest arg of `runtimeType` has been added. Runtimes are still inferred based on the file extension of the `entrypoint`, but can be manually specified and *must* be specified for `matlab` runtime, which uses a generic `.bin` file.
