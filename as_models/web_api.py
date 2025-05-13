@@ -437,8 +437,9 @@ def _load_runtime(model_path, runtime_type=None):
         manifest = Manifest.from_file(manifest_path)
     except Exception as e:
         raise RuntimeError('Failed to read manifest for model at {}: {}'.format(model_path, e))
-    # See if we can inject the runtime type from the manifest
+
     model_dir = os.path.dirname(manifest_path)
+    # If args are passed into function use param, else use manifest args
     runtime_type = runtime_type if runtime_type else str(manifest.runtime).lower()
     if runtime_type == 'matlab':
         return MatlabModelRuntime(model_dir, manifest)
@@ -450,8 +451,7 @@ def _load_runtime(model_path, runtime_type=None):
     candidate_runtimes = [runtime for runtime in (
         # NOTE: the Matlab runtime is deliberately omitted from this list due to difficulty in automatically checking if
         # a given entrypoint is for a Matlab model. Matlab execution must be explicitly requested using `runtime_type`.
-        PythonModelRuntime(model_dir, manifest),
-        RModelRuntime(model_dir, manifest)
+        PythonModelRuntime(model_dir, manifest), RModelRuntime(model_dir, manifest)
     ) if runtime.is_valid()]
 
     if len(candidate_runtimes) != 1:

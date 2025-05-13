@@ -30,3 +30,7 @@ An HTML coverage report can then be generated with these commands:
     coverage html
 
 The results will be placed in the '/htmlcov' directory.
+
+# Model manifest changes
+
+In `v4.5.0` a optional manifest arg of `runtimeType` has been added.
