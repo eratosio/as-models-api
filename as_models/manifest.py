@@ -61,7 +61,6 @@ class Manifest(Entity):
         self.group_ids = frozenset(raw.get('groupIds', []))
         self.entrypoint = raw['entrypoint']
         self.dependencies = frozenset(Dependency(dependency) for dependency in raw.get('dependencies', []))
-        self.runtime = raw.get("runtimeType")
 
         models = frozenset(Model(model) for model in raw['models'])
         self.models = { model.id:model for model in models }

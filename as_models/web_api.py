@@ -439,8 +439,6 @@ def _load_runtime(model_path, runtime_type=None):
         raise RuntimeError('Failed to read manifest for model at {}: {}'.format(model_path, e))
 
     model_dir = os.path.dirname(manifest_path)
-    # If args are passed into function use param, else use manifest args
-    runtime_type = runtime_type if runtime_type else str(manifest.runtime).lower()
     if runtime_type == 'matlab':
         return MatlabModelRuntime(model_dir, manifest)
     elif runtime_type == 'python':
