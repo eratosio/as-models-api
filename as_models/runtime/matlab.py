@@ -12,13 +12,12 @@ class MatlabModelRuntime(ModelRuntime):
     REQUEST_FILE_NAME = 'job_request.json'
 
     def is_valid(self):
-        """Ensure that .jar files are rejected on model upload"""
-        return os.path.isfile(self.entrypoint_path) and os.path.splitext(self.entrypoint_path)[1].lower() != '.jar'
+        """Ensure that entrypoint is a valid file"""
+        return os.path.isfile(self.entrypoint_path)
 
     def apply_entrypoint_permissions(self, entrypoint_file: Path):
         """Ensure that entrypoint file from model has execute permissions"""
         st = entrypoint_file.stat()
-        self.logger.debug(f"Initial binary permissions: {stat.filemode(st.st_mode)} ({st.st_mode:o})")
 
         # Ensure binary is executable and update permissions
         entrypoint_file.chmod(st.st_mode | stat.S_IXUSR)
@@ -49,9 +48,6 @@ class MatlabModelRuntime(ModelRuntime):
         updater.update()
         
         command = [str(matlab_binary), "-nodisplay", "-nosplash", "-nodesktop", "-batch"]
-
-        if args:
-            command.extend(args)
 
         self.logger.debug('Matlab execution environment: %s', env)
         self.logger.debug('Matlab execution command: %s', command)
