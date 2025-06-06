@@ -17,3 +17,4 @@ venv
 venv27
 
 .tox
+.DS_Store
