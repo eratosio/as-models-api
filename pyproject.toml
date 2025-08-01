@@ -34,8 +34,8 @@ classifiers = [
 Homepage = "https://bitbucket.csiro.au/projects/SC/repos/as-models-api/browse"
 
 [project.optional-dependencies]
-r = ["rpy2==3.3.3"]
-test = ["httpretty==1.1.4", "webob==1.8.7", "xarray==0.18.0", "rpy2==3.3.3"]
+r = ["rpy2>=3.3.3,<4.0.0"]
+test = ["httpretty==1.1.4", "webob==1.8.7", "xarray==0.18.0", "rpy2==3.3.3,<4.0.0"]
 
 [tool.hatch.version]
 path = "as_models/version.py"

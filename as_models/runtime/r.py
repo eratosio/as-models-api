@@ -44,7 +44,10 @@ class RModelRuntime(ModelRuntime):
 
         # Enable custom conversions.
         # Requires rpy2==3.3.x (r_requirements.txt)
-        @conversion.py2rpy.register(type(None))
+        #
+        default_converter = conversion.converter
+
+        @default_converter.py2rpy.register(type(None))
         def convert_none(none):
             return NULL
 
